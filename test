@@ -1,0 +1,3808 @@
+local ely = script.Parent:WaitForChild("UI")
+
+local OutputSB = ely:WaitForChild("startup")
+local ScriptArea = ely:WaitForChild("ScriptArea")
+local ScriptContent = ScriptArea:WaitForChild("Script")
+
+local a = {}
+local b = {}
+local c = {}
+local d = {}
+local e = {}
+local f = {}
+local g = 8
+local function h(i)
+	if not i then
+		error("assertion failed!")
+	end
+end
+function a:make_getS(j)
+	local k = j
+	return function()
+		if not k then
+			return nil
+		end
+		local l = k
+		k = nil
+		return l
+	end
+end
+function a:make_getF(m)
+	local n = 512
+	local o = 1
+	return function()
+		local j = m:sub(o, o + n - 1)
+		o = math.min(#m + 1, o + n)
+		return j
+	end
+end
+function a:init(p, l)
+	if not p then
+		return
+	end
+	local q = {}
+	q.reader = p
+	q.data = l or ""
+	if not l or l == "" then
+		q.n = 0
+	else
+		q.n = #l
+	end
+	q.p = 0
+	return q
+end
+function a:fill(q)
+	local j = q.reader()
+	q.data = j
+	if not j or j == "" then
+		return "EOZ"
+	end
+	q.n, q.p = #j - 1, 1
+	return string.sub(j, 1, 1)
+end
+function a:zgetc(q)
+	local r, s = q.n, q.p + 1
+	if r > 0 then
+		q.n, q.p = r - 1, s
+		return string.sub(q.data, s, s)
+	else
+		return self:fill(q)
+	end
+end
+c.RESERVED = [[
+TK_AND and
+TK_BREAK break
+TK_DO do
+TK_ELSE else
+TK_ELSEIF elseif
+TK_END end
+TK_FALSE false
+TK_FOR for
+TK_FUNCTION function
+TK_IF if
+TK_IN in
+TK_LOCAL local
+TK_NIL nil
+TK_NOT not
+TK_OR or
+TK_REPEAT repeat
+TK_RETURN return
+TK_THEN then
+TK_TRUE true
+TK_UNTIL until
+TK_WHILE while
+TK_CONCAT ..
+TK_DOTS ...
+TK_EQ ==
+TK_GE >=
+TK_LE <=
+TK_NE ~=
+TK_NAME <name>
+TK_NUMBER <number>
+TK_STRING <string>
+TK_EOS <eof>]]
+c.MAXSRC = 80
+c.MAX_INT = 2147483645
+c.LUA_QS = "'%s'"
+c.LUA_COMPAT_LSTR = 1
+function c:init()
+	local t, u = {}, {}
+	for v in string.gmatch(self.RESERVED, "[^\n]+") do
+		local _, _, x, y = string.find(v, "(%S+)%s+(%S+)")
+		t[x] = y
+		u[y] = x
+	end
+	self.tokens = t
+	self.enums = u
+end
+function c:chunkid(m, z)
+	local A
+	local B = string.sub(m, 1, 1)
+	if B == "=" then
+		A = string.sub(m, 2, z)
+	else
+		if B == "@" then
+			m = string.sub(m, 2)
+			z = z - #" '...' "
+			local C = #m
+			A = ""
+			if C > z then
+				m = string.sub(m, 1 + C - z)
+				A = A .. "..."
+			end
+			A = A .. m
+		else
+			local D = string.find(m, "[\n\r]")
+			D = D and D - 1 or #m
+			z = z - #' [string "..."] '
+			if D > z then
+				D = z
+			end
+			A = '[string "'
+			if D < #m then
+				A = A .. string.sub(m, 1, D) .. "..."
+			else
+				A = A .. m
+			end
+			A = A .. '"]'
+		end
+	end
+	return A
+end
+function c:token2str(E, F)
+	if string.sub(F, 1, 3) ~= "TK_" then
+		if string.find(F, "%c") then
+			return string.format("char(%d)", string.byte(F))
+		end
+		return F
+	else
+		return self.tokens[F]
+	end
+end
+function c:lexerror(E, G, F)
+	local function H(E, F)
+		if F == "TK_NAME" or F == "TK_STRING" or F == "TK_NUMBER" then
+			return E.buff
+		else
+			return self:token2str(E, F)
+		end
+	end
+	local j = self:chunkid(E.source, self.MAXSRC)
+	local G = string.format("%s:%d: %s", j, E.linenumber, G)
+	if F then
+		G = string.format("%s near " .. self.LUA_QS, G, H(E, F))
+	end
+	error(G)
+end
+function c:syntaxerror(E, G)
+	self:lexerror(E, G, E.t.token)
+end
+function c:currIsNewline(E)
+	return E.current == "\n" or E.current == "\r"
+end
+function c:inclinenumber(E)
+	local I = E.current
+	self:nextc(E)
+	if self:currIsNewline(E) and E.current ~= I then
+		self:nextc(E)
+	end
+	E.linenumber = E.linenumber + 1
+	if E.linenumber >= self.MAX_INT then
+		self:syntaxerror(E, "chunk has too many lines")
+	end
+end
+function c:setinput(J, E, q, m)
+	if not E then
+		E = {}
+	end
+	if not E.lookahead then
+		E.lookahead = {}
+	end
+	if not E.t then
+		E.t = {}
+	end
+	E.decpoint = "."
+	E.L = J
+	E.lookahead.token = "TK_EOS"
+	E.z = q
+	E.fs = nil
+	E.linenumber = 1
+	E.lastline = 1
+	E.source = m
+	self:nextc(E)
+end
+function c:check_next(E, K)
+	if not string.find(K, E.current, 1, 1) then
+		return false
+	end
+	self:save_and_next(E)
+	return true
+end
+function c:next(E)
+	E.lastline = E.linenumber
+	if E.lookahead.token ~= "TK_EOS" then
+		E.t.seminfo = E.lookahead.seminfo
+		E.t.token = E.lookahead.token
+		E.lookahead.token = "TK_EOS"
+	else
+		E.t.token = self:llex(E, E.t)
+	end
+end
+function c:lookahead(E)
+	E.lookahead.token = self:llex(E, E.lookahead)
+end
+function c:nextc(E)
+	local L = a:zgetc(E.z)
+	E.current = L
+	return L
+end
+function c:save(E, L)
+	local j = E.buff
+	E.buff = j .. L
+end
+function c:save_and_next(E)
+	self:save(E, E.current)
+	return self:nextc(E)
+end
+function c:str2d(M)
+	local N = tonumber(M)
+	if N then
+		return N
+	end
+	if string.lower(string.sub(M, 1, 2)) == "0x" then
+		N = tonumber(M, 16)
+		if N then
+			return N
+		end
+	end
+	return nil
+end
+function c:buffreplace(E, O, P)
+	local N, j = "", E.buff
+	for s = 1, #j do
+		local L = string.sub(j, s, s)
+		if L == O then
+			L = P
+		end
+		N = N .. L
+	end
+	E.buff = N
+end
+function c:trydecpoint(E, Q)
+	local I = E.decpoint
+	self:buffreplace(E, I, E.decpoint)
+	local R = self:str2d(E.buff)
+	Q.seminfo = R
+	if not R then
+		self:buffreplace(E, E.decpoint, ".")
+		self:lexerror(E, "malformed number", "TK_NUMBER")
+	end
+end
+function c:read_numeral(E, Q)
+	repeat
+		self:save_and_next(E)
+	until string.find(E.current, "%D") and E.current ~= "."
+	if self:check_next(E, "Ee") then
+		self:check_next(E, "+-")
+	end
+	while string.find(E.current, "^%w$") or E.current == "_" do
+		self:save_and_next(E)
+	end
+	self:buffreplace(E, ".", E.decpoint)
+	local R = self:str2d(E.buff)
+	Q.seminfo = R
+	if not R then
+		self:trydecpoint(E, Q)
+	end
+end
+function c:skip_sep(E)
+	local S = 0
+	local M = E.current
+	self:save_and_next(E)
+	while E.current == "=" do
+		self:save_and_next(E)
+		S = S + 1
+	end
+	return E.current == M and S or -S - 1
+end
+function c:read_long_string(E, Q, T)
+	local U = 0
+	self:save_and_next(E)
+	if self:currIsNewline(E) then
+		self:inclinenumber(E)
+	end
+	while true do
+		local L = E.current
+		if L == "EOZ" then
+			self:lexerror(E, Q and "unfinished long string" or "unfinished long comment", "TK_EOS")
+		elseif L == "[" then
+			if self.LUA_COMPAT_LSTR then
+				if self:skip_sep(E) == T then
+					self:save_and_next(E)
+					U = U + 1
+					if self.LUA_COMPAT_LSTR == 1 then
+						if T == 0 then
+							self:lexerror(E, "nesting of [[...]] is deprecated", "[")
+						end
+					end
+				end
+			end
+		elseif L == "]" then
+			if self:skip_sep(E) == T then
+				self:save_and_next(E)
+				if self.LUA_COMPAT_LSTR and self.LUA_COMPAT_LSTR == 2 then
+					U = U - 1
+					if T == 0 and U >= 0 then
+						break
+					end
+				end
+				break
+			end
+		elseif self:currIsNewline(E) then
+			self:save(E, "\n")
+			self:inclinenumber(E)
+			if not Q then
+				E.buff = ""
+			end
+		else
+			if Q then
+				self:save_and_next(E)
+			else
+				self:nextc(E)
+			end
+		end
+	end
+	if Q then
+		local s = 3 + T
+		Q.seminfo = string.sub(E.buff, s, -s)
+	end
+end
+function c:read_string(E, V, Q)
+	self:save_and_next(E)
+	while E.current ~= V do
+		local L = E.current
+		if L == "EOZ" then
+			self:lexerror(E, "unfinished string", "TK_EOS")
+		elseif self:currIsNewline(E) then
+			self:lexerror(E, "unfinished string", "TK_STRING")
+		elseif L == "\\" then
+			L = self:nextc(E)
+			if self:currIsNewline(E) then
+				self:save(E, "\n")
+				self:inclinenumber(E)
+			elseif L ~= "EOZ" then
+				local W = string.find("abfnrtv", L, 1, 1)
+				if W then
+					self:save(E, string.sub("\a\b\f\n\r\t\v", W, W))
+					self:nextc(E)
+				elseif not string.find(L, "%d") then
+					self:save_and_next(E)
+				else
+					L, W = 0, 0
+					repeat
+						L = 10 * L + E.current
+						self:nextc(E)
+						W = W + 1
+					until W >= 3 or not string.find(E.current, "%d")
+					if L > 255 then
+						self:lexerror(E, "escape sequence too large", "TK_STRING")
+					end
+					self:save(E, string.char(L))
+				end
+			end
+		else
+			self:save_and_next(E)
+		end
+	end
+	self:save_and_next(E)
+	Q.seminfo = string.sub(E.buff, 2, -2)
+end
+function c:llex(E, Q)
+	E.buff = ""
+	while true do
+		local L = E.current
+		if self:currIsNewline(E) then
+			self:inclinenumber(E)
+		elseif L == "-" then
+			L = self:nextc(E)
+			if L ~= "-" then
+				return "-"
+			end
+			local T = -1
+			if self:nextc(E) == "[" then
+				T = self:skip_sep(E)
+				E.buff = ""
+			end
+			if T >= 0 then
+				self:read_long_string(E, nil, T)
+				E.buff = ""
+			else
+				while not self:currIsNewline(E) and E.current ~= "EOZ" do
+					self:nextc(E)
+				end
+			end
+		elseif L == "[" then
+			local T = self:skip_sep(E)
+			if T >= 0 then
+				self:read_long_string(E, Q, T)
+				return "TK_STRING"
+			elseif T == -1 then
+				return "["
+			else
+				self:lexerror(E, "invalid long string delimiter", "TK_STRING")
+			end
+		elseif L == "=" then
+			L = self:nextc(E)
+			if L ~= "=" then
+				return "="
+			else
+				self:nextc(E)
+				return "TK_EQ"
+			end
+		elseif L == "<" then
+			L = self:nextc(E)
+			if L ~= "=" then
+				return "<"
+			else
+				self:nextc(E)
+				return "TK_LE"
+			end
+		elseif L == ">" then
+			L = self:nextc(E)
+			if L ~= "=" then
+				return ">"
+			else
+				self:nextc(E)
+				return "TK_GE"
+			end
+		elseif L == "~" then
+			L = self:nextc(E)
+			if L ~= "=" then
+				return "~"
+			else
+				self:nextc(E)
+				return "TK_NE"
+			end
+		elseif L == '"' or L == "'" then
+			self:read_string(E, L, Q)
+			return "TK_STRING"
+		elseif L == "." then
+			L = self:save_and_next(E)
+			if self:check_next(E, ".") then
+				if self:check_next(E, ".") then
+					return "TK_DOTS"
+				else
+					return "TK_CONCAT"
+				end
+			elseif not string.find(L, "%d") then
+				return "."
+			else
+				self:read_numeral(E, Q)
+				return "TK_NUMBER"
+			end
+		elseif L == "EOZ" then
+			return "TK_EOS"
+		else
+			if string.find(L, "%s") then
+				self:nextc(E)
+			elseif string.find(L, "%d") then
+				self:read_numeral(E, Q)
+				return "TK_NUMBER"
+			elseif string.find(L, "[_%a]") then
+				repeat
+					L = self:save_and_next(E)
+				until L == "EOZ" or not string.find(L, "[_%w]")
+				local X = E.buff
+				local x = self.enums[X]
+				if x then
+					return x
+				end
+				Q.seminfo = X
+				return "TK_NAME"
+			else
+				self:nextc(E)
+				return L
+			end
+		end
+	end
+end
+d.OpMode = {iABC = 0, iABx = 1, iAsBx = 2}
+d.SIZE_C = 9
+d.SIZE_B = 9
+d.SIZE_Bx = d.SIZE_C + d.SIZE_B
+d.SIZE_A = 8
+d.SIZE_OP = 6
+d.POS_OP = 0
+d.POS_A = d.POS_OP + d.SIZE_OP
+d.POS_C = d.POS_A + d.SIZE_A
+d.POS_B = d.POS_C + d.SIZE_C
+d.POS_Bx = d.POS_C
+d.MAXARG_Bx = math.ldexp(1, d.SIZE_Bx) - 1
+d.MAXARG_sBx = math.floor(d.MAXARG_Bx / 2)
+d.MAXARG_A = math.ldexp(1, d.SIZE_A) - 1
+d.MAXARG_B = math.ldexp(1, d.SIZE_B) - 1
+d.MAXARG_C = math.ldexp(1, d.SIZE_C) - 1
+function d:GET_OPCODE(W)
+	return self.ROpCode[W.OP]
+end
+function d:SET_OPCODE(W, Y)
+	W.OP = self.OpCode[Y]
+end
+function d:GETARG_A(W)
+	return W.A
+end
+function d:SETARG_A(W, Z)
+	W.A = Z
+end
+function d:GETARG_B(W)
+	return W.B
+end
+function d:SETARG_B(W, k)
+	W.B = k
+end
+function d:GETARG_C(W)
+	return W.C
+end
+function d:SETARG_C(W, k)
+	W.C = k
+end
+function d:GETARG_Bx(W)
+	return W.Bx
+end
+function d:SETARG_Bx(W, k)
+	W.Bx = k
+end
+function d:GETARG_sBx(W)
+	return W.Bx - self.MAXARG_sBx
+end
+function d:SETARG_sBx(W, k)
+	W.Bx = k + self.MAXARG_sBx
+end
+function d:CREATE_ABC(Y, _, k, L)
+	return {OP = self.OpCode[Y], A = _, B = k, C = L}
+end
+function d:CREATE_ABx(Y, _, a0)
+	return {OP = self.OpCode[Y], A = _, Bx = a0}
+end
+function d:CREATE_Inst(L)
+	local Y = L % 64
+	L = (L - Y) / 64
+	local _ = L % 256
+	L = (L - _) / 256
+	return self:CREATE_ABx(Y, _, L)
+end
+function d:Instruction(W)
+	if W.Bx then
+		W.C = W.Bx % 512
+		W.B = (W.Bx - W.C) / 512
+	end
+	local a1 = W.A * 64 + W.OP
+	local a2 = a1 % 256
+	a1 = W.C * 64 + (a1 - a2) / 256
+	local a3 = a1 % 256
+	a1 = W.B * 128 + (a1 - a3) / 256
+	local a4 = a1 % 256
+	local a5 = (a1 - a4) / 256
+	return string.char(a2, a3, a4, a5)
+end
+function d:DecodeInst(a6)
+	local a7 = string.byte
+	local W = {}
+	local a1 = a7(a6, 1)
+	local a8 = a1 % 64
+	W.OP = a8
+	a1 = a7(a6, 2) * 4 + (a1 - a8) / 64
+	local _ = a1 % 256
+	W.A = _
+	a1 = a7(a6, 3) * 4 + (a1 - _) / 256
+	local L = a1 % 512
+	W.C = L
+	W.B = a7(a6, 4) * 2 + (a1 - L) / 512
+	local a9 = self.OpMode[tonumber(string.sub(self.opmodes[a8 + 1], 7, 7))]
+	if a9 ~= "iABC" then
+		W.Bx = W.B * 512 + W.C
+	end
+	return W
+end
+d.BITRK = math.ldexp(1, d.SIZE_B - 1)
+function d:ISK(a6)
+	return a6 >= self.BITRK
+end
+d.MAXINDEXRK = d.BITRK - 1
+function d:RKASK(a6)
+	return a6 + self.BITRK
+end
+d.NO_REG = d.MAXARG_A
+d.opnames = {}
+d.OpCode = {}
+d.ROpCode = {}
+local W = 0
+for v in string.gmatch(
+    [[
+MOVE LOADK LOADBOOL LOADNIL GETUPVAL
+GETGLOBAL GETTABLE SETGLOBAL SETUPVAL SETTABLE
+NEWTABLE SELF ADD SUB MUL
+DIV MOD POW UNM NOT
+LEN CONCAT JMP EQ LT
+LE TEST TESTSET CALL TAILCALL
+RETURN FORLOOP FORPREP TFORLOOP SETLIST
+CLOSE CLOSURE VARARG
+]],
+	"%S+"
+	) do
+	local r = "OP_" .. v
+	d.opnames[W] = v
+	d.OpCode[r] = W
+	d.ROpCode[W] = r
+	W = W + 1
+end
+d.NUM_OPCODES = W
+d.OpArgMask = {OpArgN = 0, OpArgU = 1, OpArgR = 2, OpArgK = 3}
+function d:getOpMode(aa)
+	return self.opmodes[self.OpCode[aa]] % 4
+end
+function d:getBMode(aa)
+	return math.floor(self.opmodes[self.OpCode[aa]] / 16) % 4
+end
+function d:getCMode(aa)
+	return math.floor(self.opmodes[self.OpCode[aa]] / 4) % 4
+end
+function d:testAMode(aa)
+	return math.floor(self.opmodes[self.OpCode[aa]] / 64) % 2
+end
+function d:testTMode(aa)
+	return math.floor(self.opmodes[self.OpCode[aa]] / 128)
+end
+d.LFIELDS_PER_FLUSH = 50
+local function a9(ab, _, k, L, aa)
+	local d = d
+	return ab * 128 + _ * 64 + d.OpArgMask[k] * 16 + d.OpArgMask[L] * 4 + d.OpMode[aa]
+end
+d.opmodes = {
+	a9(0, 1, "OpArgK", "OpArgN", "iABx"),
+	a9(0, 1, "OpArgU", "OpArgU", "iABC"),
+	a9(0, 1, "OpArgR", "OpArgN", "iABC"),
+	a9(0, 1, "OpArgU", "OpArgN", "iABC"),
+	a9(0, 1, "OpArgK", "OpArgN", "iABx"),
+	a9(0, 1, "OpArgR", "OpArgK", "iABC"),
+	a9(0, 0, "OpArgK", "OpArgN", "iABx"),
+	a9(0, 0, "OpArgU", "OpArgN", "iABC"),
+	a9(0, 0, "OpArgK", "OpArgK", "iABC"),
+	a9(0, 1, "OpArgU", "OpArgU", "iABC"),
+	a9(0, 1, "OpArgR", "OpArgK", "iABC"),
+	a9(0, 1, "OpArgK", "OpArgK", "iABC"),
+	a9(0, 1, "OpArgK", "OpArgK", "iABC"),
+	a9(0, 1, "OpArgK", "OpArgK", "iABC"),
+	a9(0, 1, "OpArgK", "OpArgK", "iABC"),
+	a9(0, 1, "OpArgK", "OpArgK", "iABC"),
+	a9(0, 1, "OpArgK", "OpArgK", "iABC"),
+	a9(0, 1, "OpArgR", "OpArgN", "iABC"),
+	a9(0, 1, "OpArgR", "OpArgN", "iABC"),
+	a9(0, 1, "OpArgR", "OpArgN", "iABC"),
+	a9(0, 1, "OpArgR", "OpArgR", "iABC"),
+	a9(0, 0, "OpArgR", "OpArgN", "iAsBx"),
+	a9(1, 0, "OpArgK", "OpArgK", "iABC"),
+	a9(1, 0, "OpArgK", "OpArgK", "iABC"),
+	a9(1, 0, "OpArgK", "OpArgK", "iABC"),
+	a9(1, 1, "OpArgR", "OpArgU", "iABC"),
+	a9(1, 1, "OpArgR", "OpArgU", "iABC"),
+	a9(0, 1, "OpArgU", "OpArgU", "iABC"),
+	a9(0, 1, "OpArgU", "OpArgU", "iABC"),
+	a9(0, 0, "OpArgU", "OpArgN", "iABC"),
+	a9(0, 1, "OpArgR", "OpArgN", "iAsBx"),
+	a9(0, 1, "OpArgR", "OpArgN", "iAsBx"),
+	a9(1, 0, "OpArgN", "OpArgU", "iABC"),
+	a9(0, 0, "OpArgU", "OpArgU", "iABC"),
+	a9(0, 0, "OpArgN", "OpArgN", "iABC"),
+	a9(0, 1, "OpArgU", "OpArgN", "iABx"),
+	a9(0, 1, "OpArgU", "OpArgN", "iABC")
+}
+d.opmodes[0] = a9(0, 1, "OpArgR", "OpArgN", "iABC")
+e.LUA_SIGNATURE = "\27Lua"
+e.LUA_TNUMBER = 3
+e.LUA_TSTRING = 4
+e.LUA_TNIL = 0
+e.LUA_TBOOLEAN = 1
+e.LUA_TNONE = -1
+e.LUAC_VERSION = 0x51
+e.LUAC_FORMAT = 0
+e.LUAC_HEADERSIZE = 12
+function e:make_setS()
+	local j = {}
+	j.data = ""
+	local ac = function(M, j)
+		if not M then
+			return 0
+		end
+		j.data = j.data .. M
+		return 0
+	end
+	return ac, j
+end
+function e:ttype(Y)
+	local ad = type(Y.value)
+	if ad == "number" then
+		return self.LUA_TNUMBER
+	elseif ad == "string" then
+		return self.LUA_TSTRING
+	elseif ad == "nil" then
+		return self.LUA_TNIL
+	elseif ad == "boolean" then
+		return self.LUA_TBOOLEAN
+	else
+		return self.LUA_TNONE
+	end
+end
+function e:from_double(a6)
+	local function ae(v)
+		local L = v % 256
+		return (v - L) / 256, string.char(L)
+	end
+	local af = 0
+	if a6 < 0 then
+		af = 1
+		a6 = -a6
+	end
+	local ag, ah = math.frexp(a6)
+	if a6 == 0 then
+		ag, ah = 0, 0
+	elseif a6 == 1 / 0 then
+		ag, ah = 0, 2047
+	else
+		ag = (ag * 2 - 1) * math.ldexp(0.5, 53)
+		ah = ah + 1022
+	end
+	local v = ""
+	local a7
+	a6 = math.floor(ag)
+	for W = 1, 6 do
+		a6, a7 = ae(a6)
+		v = v .. a7
+	end
+	a6, a7 = ae(ah * 16 + a6)
+	v = v .. a7
+	a6, a7 = ae(af * 128 + a6)
+	v = v .. a7
+	return v
+end
+function e:from_int(a6)
+	local v = ""
+	a6 = math.floor(a6)
+	if a6 < 0 then
+		a6 = 4294967296 + a6
+	end
+	for W = 1, 4 do
+		local L = a6 % 256
+		v = v .. string.char(L)
+		a6 = math.floor(a6 / 256)
+	end
+	return v
+end
+function e:DumpBlock(k, ai)
+	if ai.status == 0 then
+		ai.status = ai.write(k, ai.data)
+	end
+end
+function e:DumpChar(aj, ai)
+	self:DumpBlock(string.char(aj), ai)
+end
+function e:DumpInt(a6, ai)
+	self:DumpBlock(self:from_int(a6), ai)
+end
+function e:DumpSizeT(a6, ai)
+	self:DumpBlock(self:from_int(a6), ai)
+	if g == 8 then
+		self:DumpBlock(self:from_int(0), ai)
+	end
+end
+function e:DumpNumber(a6, ai)
+	self:DumpBlock(self:from_double(a6), ai)
+end
+function e:DumpString(M, ai)
+	if M == nil then
+		self:DumpSizeT(0, ai)
+	else
+		M = M .. "\0"
+		self:DumpSizeT(#M, ai)
+		self:DumpBlock(M, ai)
+	end
+end
+function e:DumpCode(ak, ai)
+	local r = ak.sizecode
+	self:DumpInt(r, ai)
+	for W = 0, r - 1 do
+		self:DumpBlock(d:Instruction(ak.code[W]), ai)
+	end
+end
+function e:DumpConstants(ak, ai)
+	local r = ak.sizek
+	self:DumpInt(r, ai)
+	for W = 0, r - 1 do
+		local Y = ak.k[W]
+		local ad = self:ttype(Y)
+		self:DumpChar(ad, ai)
+		if ad == self.LUA_TNIL then
+		elseif ad == self.LUA_TBOOLEAN then
+			self:DumpChar(Y.value and 1 or 0, ai)
+		elseif ad == self.LUA_TNUMBER then
+			self:DumpNumber(Y.value, ai)
+		elseif ad == self.LUA_TSTRING then
+			self:DumpString(Y.value, ai)
+		else
+		end
+	end
+	r = ak.sizep
+	self:DumpInt(r, ai)
+	for W = 0, r - 1 do
+		self:DumpFunction(ak.p[W], ak.source, ai)
+	end
+end
+function e:DumpDebug(ak, ai)
+	local r
+	r = ai.strip and 0 or ak.sizelineinfo
+	self:DumpInt(r, ai)
+	for W = 0, r - 1 do
+		self:DumpInt(ak.lineinfo[W], ai)
+	end
+	r = ai.strip and 0 or ak.sizelocvars
+	self:DumpInt(r, ai)
+	for W = 0, r - 1 do
+		self:DumpString(ak.locvars[W].varname, ai)
+		self:DumpInt(ak.locvars[W].startpc, ai)
+		self:DumpInt(ak.locvars[W].endpc, ai)
+	end
+	r = ai.strip and 0 or ak.sizeupvalues
+	self:DumpInt(r, ai)
+	for W = 0, r - 1 do
+		self:DumpString(ak.upvalues[W], ai)
+	end
+end
+function e:DumpFunction(ak, s, ai)
+	local m = ak.source
+	if m == s or ai.strip then
+		m = nil
+	end
+	self:DumpString(m, ai)
+	self:DumpInt(ak.lineDefined, ai)
+	self:DumpInt(ak.lastlinedefined, ai)
+	self:DumpChar(ak.nups, ai)
+	self:DumpChar(ak.numparams, ai)
+	self:DumpChar(ak.is_vararg, ai)
+	self:DumpChar(ak.maxstacksize, ai)
+	self:DumpCode(ak, ai)
+	self:DumpConstants(ak, ai)
+	self:DumpDebug(ak, ai)
+end
+function e:DumpHeader(ai)
+	local al = self:header()
+	assert(#al == self.LUAC_HEADERSIZE)
+	self:DumpBlock(al, ai)
+end
+function e:header()
+	local a6 = 1
+	return self.LUA_SIGNATURE .. string.char(self.LUAC_VERSION, self.LUAC_FORMAT, a6, 4, g, 4, 8, 0)
+end
+function e:dump(J, ak, am, l, an)
+	local ai = {}
+	ai.L = J
+	ai.write = am
+	ai.data = l
+	ai.strip = an
+	ai.status = 0
+	self:DumpHeader(ai)
+	self:DumpFunction(ak, nil, ai)
+	ai.write(nil, ai.data)
+	return ai.status
+end
+f.MAXSTACK = 250
+function f:ttisnumber(Y)
+	if Y then
+		return type(Y.value) == "number"
+	else
+		return false
+	end
+end
+function f:nvalue(Y)
+	return Y.value
+end
+function f:setnilvalue(Y)
+	Y.value = nil
+end
+function f:setsvalue(Y, a6)
+	Y.value = a6
+end
+f.setnvalue = f.setsvalue
+f.sethvalue = f.setsvalue
+f.setbvalue = f.setsvalue
+function f:numadd(_, k)
+	return _ + k
+end
+function f:numsub(_, k)
+	return _ - k
+end
+function f:nummul(_, k)
+	return _ * k
+end
+function f:numdiv(_, k)
+	return _ / k
+end
+function f:nummod(_, k)
+	return _ % k
+end
+function f:numpow(_, k)
+	return _ ^ k
+end
+function f:numunm(_)
+	return -_
+end
+function f:numisnan(_)
+	return not (_ == _)
+end
+f.NO_JUMP = -1
+f.BinOpr = {
+	OPR_ADD = 0,
+	OPR_SUB = 1,
+	OPR_MUL = 2,
+	OPR_DIV = 3,
+	OPR_MOD = 4,
+	OPR_POW = 5,
+	OPR_CONCAT = 6,
+	OPR_NE = 7,
+	OPR_EQ = 8,
+	OPR_LT = 9,
+	OPR_LE = 10,
+	OPR_GT = 11,
+	OPR_GE = 12,
+	OPR_AND = 13,
+	OPR_OR = 14,
+	OPR_NOBINOPR = 15
+}
+f.UnOpr = {OPR_MINUS = 0, OPR_NOT = 1, OPR_LEN = 2, OPR_NOUNOPR = 3}
+function f:getcode(ao, ap)
+	return ao.f.code[ap.info]
+end
+function f:codeAsBx(ao, Y, aq, ar)
+	return self:codeABx(ao, Y, aq, ar + d.MAXARG_sBx)
+end
+function f:setmultret(ao, ap)
+	self:setreturns(ao, ap, b.LUA_MULTRET)
+end
+function f:hasjumps(ap)
+	return ap.t ~= ap.f
+end
+function f:isnumeral(ap)
+	return ap.k == "VKNUM" and ap.t == self.NO_JUMP and ap.f == self.NO_JUMP
+end
+function f:_nil(ao, O, r)
+	if ao.pc > ao.lasttarget then
+		if ao.pc == 0 then
+			if O >= ao.nactvar then
+				return
+			end
+		else
+			local as = ao.f.code[ao.pc - 1]
+			if d:GET_OPCODE(as) == "OP_LOADNIL" then
+				local at = d:GETARG_A(as)
+				local au = d:GETARG_B(as)
+				if at <= O and O <= au + 1 then
+					if O + r - 1 > au then
+						d:SETARG_B(as, O + r - 1)
+					end
+					return
+				end
+			end
+		end
+	end
+	self:codeABC(ao, "OP_LOADNIL", O, O + r - 1, 0)
+end
+function f:jump(ao)
+	local av = ao.jpc
+	ao.jpc = self.NO_JUMP
+	local aw = self:codeAsBx(ao, "OP_JMP", 0, self.NO_JUMP)
+	aw = self:concat(ao, aw, av)
+	return aw
+end
+function f:ret(ao, B, ax)
+	self:codeABC(ao, "OP_RETURN", B, ax + 1, 0)
+end
+function f:condjump(ao, a8, aq, ay, az)
+	self:codeABC(ao, a8, aq, ay, az)
+	return self:jump(ao)
+end
+function f:fixjump(ao, aA, aB)
+	local aC = ao.f.code[aA]
+	local aD = aB - (aA + 1)
+	h(aB ~= self.NO_JUMP)
+	if math.abs(aD) > d.MAXARG_sBx then
+		c:syntaxerror(ao.ls, "control structure too long")
+	end
+	d:SETARG_sBx(aC, aD)
+end
+function f:getlabel(ao)
+	ao.lasttarget = ao.pc
+	return ao.pc
+end
+function f:getjump(ao, aA)
+	local aD = d:GETARG_sBx(ao.f.code[aA])
+	if aD == self.NO_JUMP then
+		return self.NO_JUMP
+	else
+		return aA + 1 + aD
+	end
+end
+function f:getjumpcontrol(ao, aA)
+	local aE = ao.f.code[aA]
+	local aF = ao.f.code[aA - 1]
+	if aA >= 1 and d:testTMode(d:GET_OPCODE(aF)) ~= 0 then
+		return aF
+	else
+		return aE
+	end
+end
+function f:need_value(ao, aG)
+	while aG ~= self.NO_JUMP do
+		local W = self:getjumpcontrol(ao, aG)
+		if d:GET_OPCODE(W) ~= "OP_TESTSET" then
+			return true
+		end
+		aG = self:getjump(ao, aG)
+	end
+	return false
+end
+function f:patchtestreg(ao, aH, aI)
+	local W = self:getjumpcontrol(ao, aH)
+	if d:GET_OPCODE(W) ~= "OP_TESTSET" then
+		return false
+	end
+	if aI ~= d.NO_REG and aI ~= d:GETARG_B(W) then
+		d:SETARG_A(W, aI)
+	else
+		d:SET_OPCODE(W, "OP_TEST")
+		local k = d:GETARG_B(W)
+		d:SETARG_A(W, k)
+		d:SETARG_B(W, 0)
+	end
+	return true
+end
+function f:removevalues(ao, aG)
+	while aG ~= self.NO_JUMP do
+		self:patchtestreg(ao, aG, d.NO_REG)
+		aG = self:getjump(ao, aG)
+	end
+end
+function f:patchlistaux(ao, aG, aJ, aI, aK)
+	while aG ~= self.NO_JUMP do
+		local aL = self:getjump(ao, aG)
+		if self:patchtestreg(ao, aG, aI) then
+			self:fixjump(ao, aG, aJ)
+		else
+			self:fixjump(ao, aG, aK)
+		end
+		aG = aL
+	end
+end
+function f:dischargejpc(ao)
+	self:patchlistaux(ao, ao.jpc, ao.pc, d.NO_REG, ao.pc)
+	ao.jpc = self.NO_JUMP
+end
+function f:patchlist(ao, aG, aM)
+	if aM == ao.pc then
+		self:patchtohere(ao, aG)
+	else
+		h(aM < ao.pc)
+		self:patchlistaux(ao, aG, aM, d.NO_REG, aM)
+	end
+end
+function f:patchtohere(ao, aG)
+	self:getlabel(ao)
+	ao.jpc = self:concat(ao, ao.jpc, aG)
+end
+function f:concat(ao, aN, aO)
+	if aO == self.NO_JUMP then
+		return aN
+	elseif aN == self.NO_JUMP then
+		return aO
+	else
+		local aG = aN
+		local aL = self:getjump(ao, aG)
+		while aL ~= self.NO_JUMP do
+			aG = aL
+			aL = self:getjump(ao, aG)
+		end
+		self:fixjump(ao, aG, aO)
+	end
+	return aN
+end
+function f:checkstack(ao, r)
+	local aP = ao.freereg + r
+	if aP > ao.f.maxstacksize then
+		if aP >= self.MAXSTACK then
+			c:syntaxerror(ao.ls, "function or expression too complex")
+		end
+		ao.f.maxstacksize = aP
+	end
+end
+function f:reserveregs(ao, r)
+	self:checkstack(ao, r)
+	ao.freereg = ao.freereg + r
+end
+function f:freereg(ao, aI)
+	if not d:ISK(aI) and aI >= ao.nactvar then
+		ao.freereg = ao.freereg - 1
+		h(aI == ao.freereg)
+	end
+end
+function f:freeexp(ao, ap)
+	if ap.k == "VNONRELOC" then
+		self:freereg(ao, ap.info)
+	end
+end
+function f:addk(ao, aQ, v)
+	local J = ao.L
+	local aR = ao.h[aQ.value]
+	local ak = ao.f
+	if self:ttisnumber(aR) then
+		return self:nvalue(aR)
+	else
+		aR = {}
+		self:setnvalue(aR, ao.nk)
+		ao.h[aQ.value] = aR
+		b:growvector(J, ak.k, ao.nk, ak.sizek, nil, d.MAXARG_Bx, "constant table overflow")
+		ak.k[ao.nk] = v
+		local aS = ao.nk
+		ao.nk = ao.nk + 1
+		return aS
+	end
+end
+function f:stringK(ao, M)
+	local Y = {}
+	self:setsvalue(Y, M)
+	return self:addk(ao, Y, Y)
+end
+function f:numberK(ao, aT)
+	local Y = {}
+	self:setnvalue(Y, aT)
+	return self:addk(ao, Y, Y)
+end
+function f:boolK(ao, k)
+	local Y = {}
+	self:setbvalue(Y, k)
+	return self:addk(ao, Y, Y)
+end
+function f:nilK(ao)
+	local aQ, v = {}, {}
+	self:setnilvalue(v)
+	self:sethvalue(aQ, ao.h)
+	return self:addk(ao, aQ, v)
+end
+function f:setreturns(ao, ap, aU)
+	if ap.k == "VCALL" then
+		d:SETARG_C(self:getcode(ao, ap), aU + 1)
+	elseif ap.k == "VVARARG" then
+		d:SETARG_B(self:getcode(ao, ap), aU + 1)
+		d:SETARG_A(self:getcode(ao, ap), ao.freereg)
+		f:reserveregs(ao, 1)
+	end
+end
+function f:setoneret(ao, ap)
+	if ap.k == "VCALL" then
+		ap.k = "VNONRELOC"
+		ap.info = d:GETARG_A(self:getcode(ao, ap))
+	elseif ap.k == "VVARARG" then
+		d:SETARG_B(self:getcode(ao, ap), 2)
+		ap.k = "VRELOCABLE"
+	end
+end
+function f:dischargevars(ao, ap)
+	local aQ = ap.k
+	if aQ == "VLOCAL" then
+		ap.k = "VNONRELOC"
+	elseif aQ == "VUPVAL" then
+		ap.info = self:codeABC(ao, "OP_GETUPVAL", 0, ap.info, 0)
+		ap.k = "VRELOCABLE"
+	elseif aQ == "VGLOBAL" then
+		ap.info = self:codeABx(ao, "OP_GETGLOBAL", 0, ap.info)
+		ap.k = "VRELOCABLE"
+	elseif aQ == "VINDEXED" then
+		self:freereg(ao, ap.aux)
+		self:freereg(ao, ap.info)
+		ap.info = self:codeABC(ao, "OP_GETTABLE", 0, ap.info, ap.aux)
+		ap.k = "VRELOCABLE"
+	elseif aQ == "VVARARG" or aQ == "VCALL" then
+		self:setoneret(ao, ap)
+	else
+	end
+end
+function f:code_label(ao, aq, k, aV)
+	self:getlabel(ao)
+	return self:codeABC(ao, "OP_LOADBOOL", aq, k, aV)
+end
+function f:discharge2reg(ao, ap, aI)
+	self:dischargevars(ao, ap)
+	local aQ = ap.k
+	if aQ == "VNIL" then
+		self:_nil(ao, aI, 1)
+	elseif aQ == "VFALSE" or aQ == "VTRUE" then
+		self:codeABC(ao, "OP_LOADBOOL", aI, ap.k == "VTRUE" and 1 or 0, 0)
+	elseif aQ == "VK" then
+		self:codeABx(ao, "OP_LOADK", aI, ap.info)
+	elseif aQ == "VKNUM" then
+		self:codeABx(ao, "OP_LOADK", aI, self:numberK(ao, ap.nval))
+	elseif aQ == "VRELOCABLE" then
+		local aA = self:getcode(ao, ap)
+		d:SETARG_A(aA, aI)
+	elseif aQ == "VNONRELOC" then
+		if aI ~= ap.info then
+			self:codeABC(ao, "OP_MOVE", aI, ap.info, 0)
+		end
+	else
+		h(ap.k == "VVOID" or ap.k == "VJMP")
+		return
+	end
+	ap.info = aI
+	ap.k = "VNONRELOC"
+end
+function f:discharge2anyreg(ao, ap)
+	if ap.k ~= "VNONRELOC" then
+		self:reserveregs(ao, 1)
+		self:discharge2reg(ao, ap, ao.freereg - 1)
+	end
+end
+function f:exp2reg(ao, ap, aI)
+	self:discharge2reg(ao, ap, aI)
+	if ap.k == "VJMP" then
+		ap.t = self:concat(ao, ap.t, ap.info)
+	end
+	if self:hasjumps(ap) then
+		local aW
+		local aX = self.NO_JUMP
+		local aY = self.NO_JUMP
+		if self:need_value(ao, ap.t) or self:need_value(ao, ap.f) then
+			local aZ = ap.k == "VJMP" and self.NO_JUMP or self:jump(ao)
+			aX = self:code_label(ao, aI, 0, 1)
+			aY = self:code_label(ao, aI, 1, 0)
+			self:patchtohere(ao, aZ)
+		end
+		aW = self:getlabel(ao)
+		self:patchlistaux(ao, ap.f, aW, aI, aX)
+		self:patchlistaux(ao, ap.t, aW, aI, aY)
+	end
+	ap.f, ap.t = self.NO_JUMP, self.NO_JUMP
+	ap.info = aI
+	ap.k = "VNONRELOC"
+end
+function f:exp2nextreg(ao, ap)
+	self:dischargevars(ao, ap)
+	self:freeexp(ao, ap)
+	self:reserveregs(ao, 1)
+	self:exp2reg(ao, ap, ao.freereg - 1)
+end
+function f:exp2anyreg(ao, ap)
+	self:dischargevars(ao, ap)
+	if ap.k == "VNONRELOC" then
+		if not self:hasjumps(ap) then
+			return ap.info
+		end
+		if ap.info >= ao.nactvar then
+			self:exp2reg(ao, ap, ap.info)
+			return ap.info
+		end
+	end
+	self:exp2nextreg(ao, ap)
+	return ap.info
+end
+function f:exp2val(ao, ap)
+	if self:hasjumps(ap) then
+		self:exp2anyreg(ao, ap)
+	else
+		self:dischargevars(ao, ap)
+	end
+end
+function f:exp2RK(ao, ap)
+	self:exp2val(ao, ap)
+	local aQ = ap.k
+	if aQ == "VKNUM" or aQ == "VTRUE" or aQ == "VFALSE" or aQ == "VNIL" then
+		if ao.nk <= d.MAXINDEXRK then
+			if ap.k == "VNIL" then
+				ap.info = self:nilK(ao)
+			else
+				ap.info = ap.k == "VKNUM" and self:numberK(ao, ap.nval) or self:boolK(ao, ap.k == "VTRUE")
+			end
+			ap.k = "VK"
+			return d:RKASK(ap.info)
+		end
+	elseif aQ == "VK" then
+		if ap.info <= d.MAXINDEXRK then
+			return d:RKASK(ap.info)
+		end
+	else
+	end
+	return self:exp2anyreg(ao, ap)
+end
+function f:storevar(ao, a_, b0)
+	local aQ = a_.k
+	if aQ == "VLOCAL" then
+		self:freeexp(ao, b0)
+		self:exp2reg(ao, b0, a_.info)
+		return
+	elseif aQ == "VUPVAL" then
+		local ap = self:exp2anyreg(ao, b0)
+		self:codeABC(ao, "OP_SETUPVAL", ap, a_.info, 0)
+	elseif aQ == "VGLOBAL" then
+		local ap = self:exp2anyreg(ao, b0)
+		self:codeABx(ao, "OP_SETGLOBAL", ap, a_.info)
+	elseif aQ == "VINDEXED" then
+		local ap = self:exp2RK(ao, b0)
+		self:codeABC(ao, "OP_SETTABLE", a_.info, a_.aux, ap)
+	else
+		h(0)
+	end
+	self:freeexp(ao, b0)
+end
+function f:_self(ao, ap, b1)
+	self:exp2anyreg(ao, ap)
+	self:freeexp(ao, ap)
+	local b2 = ao.freereg
+	self:reserveregs(ao, 2)
+	self:codeABC(ao, "OP_SELF", b2, ap.info, self:exp2RK(ao, b1))
+	self:freeexp(ao, b1)
+	ap.info = b2
+	ap.k = "VNONRELOC"
+end
+function f:invertjump(ao, ap)
+	local aA = self:getjumpcontrol(ao, ap.info)
+	h(d:testTMode(d:GET_OPCODE(aA)) ~= 0 and d:GET_OPCODE(aA) ~= "OP_TESTSET" and d:GET_OPCODE(aA) ~= "OP_TEST")
+	d:SETARG_A(aA, d:GETARG_A(aA) == 0 and 1 or 0)
+end
+function f:jumponcond(ao, ap, b3)
+	if ap.k == "VRELOCABLE" then
+		local b4 = self:getcode(ao, ap)
+		if d:GET_OPCODE(b4) == "OP_NOT" then
+			ao.pc = ao.pc - 1
+			return self:condjump(ao, "OP_TEST", d:GETARG_B(b4), 0, b3 and 0 or 1)
+		end
+	end
+	self:discharge2anyreg(ao, ap)
+	self:freeexp(ao, ap)
+	return self:condjump(ao, "OP_TESTSET", d.NO_REG, ap.info, b3 and 1 or 0)
+end
+function f:goiftrue(ao, ap)
+	local aA
+	self:dischargevars(ao, ap)
+	local aQ = ap.k
+	if aQ == "VK" or aQ == "VKNUM" or aQ == "VTRUE" then
+		aA = self.NO_JUMP
+	elseif aQ == "VFALSE" then
+		aA = self:jump(ao)
+	elseif aQ == "VJMP" then
+		self:invertjump(ao, ap)
+		aA = ap.info
+	else
+		aA = self:jumponcond(ao, ap, false)
+	end
+	ap.f = self:concat(ao, ap.f, aA)
+	self:patchtohere(ao, ap.t)
+	ap.t = self.NO_JUMP
+end
+function f:goiffalse(ao, ap)
+	local aA
+	self:dischargevars(ao, ap)
+	local aQ = ap.k
+	if aQ == "VNIL" or aQ == "VFALSE" then
+		aA = self.NO_JUMP
+	elseif aQ == "VTRUE" then
+		aA = self:jump(ao)
+	elseif aQ == "VJMP" then
+		aA = ap.info
+	else
+		aA = self:jumponcond(ao, ap, true)
+	end
+	ap.t = self:concat(ao, ap.t, aA)
+	self:patchtohere(ao, ap.f)
+	ap.f = self.NO_JUMP
+end
+function f:codenot(ao, ap)
+	self:dischargevars(ao, ap)
+	local aQ = ap.k
+	if aQ == "VNIL" or aQ == "VFALSE" then
+		ap.k = "VTRUE"
+	elseif aQ == "VK" or aQ == "VKNUM" or aQ == "VTRUE" then
+		ap.k = "VFALSE"
+	elseif aQ == "VJMP" then
+		self:invertjump(ao, ap)
+	elseif aQ == "VRELOCABLE" or aQ == "VNONRELOC" then
+		self:discharge2anyreg(ao, ap)
+		self:freeexp(ao, ap)
+		ap.info = self:codeABC(ao, "OP_NOT", 0, ap.info, 0)
+		ap.k = "VRELOCABLE"
+	else
+		h(0)
+	end
+	ap.f, ap.t = ap.t, ap.f
+	self:removevalues(ao, ap.f)
+	self:removevalues(ao, ap.t)
+end
+function f:indexed(ao, ab, aQ)
+	ab.aux = self:exp2RK(ao, aQ)
+	ab.k = "VINDEXED"
+end
+function f:constfolding(a8, b5, b6)
+	local aT
+	if not self:isnumeral(b5) or not self:isnumeral(b6) then
+		return false
+	end
+	local b7 = b5.nval
+	local b8 = b6.nval
+	if a8 == "OP_ADD" then
+		aT = self:numadd(b7, b8)
+	elseif a8 == "OP_SUB" then
+		aT = self:numsub(b7, b8)
+	elseif a8 == "OP_MUL" then
+		aT = self:nummul(b7, b8)
+	elseif a8 == "OP_DIV" then
+		if b8 == 0 then
+			return false
+		end
+		aT = self:numdiv(b7, b8)
+	elseif a8 == "OP_MOD" then
+		if b8 == 0 then
+			return false
+		end
+		aT = self:nummod(b7, b8)
+	elseif a8 == "OP_POW" then
+		aT = self:numpow(b7, b8)
+	elseif a8 == "OP_UNM" then
+		aT = self:numunm(b7)
+	elseif a8 == "OP_LEN" then
+		return false
+	else
+		h(0)
+		aT = 0
+	end
+	if self:numisnan(aT) then
+		return false
+	end
+	b5.nval = aT
+	return true
+end
+function f:codearith(ao, a8, b5, b6)
+	if self:constfolding(a8, b5, b6) then
+		return
+	else
+		local b9 = a8 ~= "OP_UNM" and a8 ~= "OP_LEN" and self:exp2RK(ao, b6) or 0
+		local ba = self:exp2RK(ao, b5)
+		if ba > b9 then
+			self:freeexp(ao, b5)
+			self:freeexp(ao, b6)
+		else
+			self:freeexp(ao, b6)
+			self:freeexp(ao, b5)
+		end
+		b5.info = self:codeABC(ao, a8, 0, ba, b9)
+		b5.k = "VRELOCABLE"
+	end
+end
+function f:codecomp(ao, a8, b3, b5, b6)
+	local ba = self:exp2RK(ao, b5)
+	local b9 = self:exp2RK(ao, b6)
+	self:freeexp(ao, b6)
+	self:freeexp(ao, b5)
+	if b3 == 0 and a8 ~= "OP_EQ" then
+		ba, b9 = b9, ba
+		b3 = 1
+	end
+	b5.info = self:condjump(ao, a8, b3, ba, b9)
+	b5.k = "VJMP"
+end
+function f:prefix(ao, a8, ap)
+	local b6 = {}
+	b6.t, b6.f = self.NO_JUMP, self.NO_JUMP
+	b6.k = "VKNUM"
+	b6.nval = 0
+	if a8 == "OPR_MINUS" then
+		if not self:isnumeral(ap) then
+			self:exp2anyreg(ao, ap)
+		end
+		self:codearith(ao, "OP_UNM", ap, b6)
+	elseif a8 == "OPR_NOT" then
+		self:codenot(ao, ap)
+	elseif a8 == "OPR_LEN" then
+		self:exp2anyreg(ao, ap)
+		self:codearith(ao, "OP_LEN", ap, b6)
+	else
+		h(0)
+	end
+end
+function f:infix(ao, a8, v)
+	if a8 == "OPR_AND" then
+		self:goiftrue(ao, v)
+	elseif a8 == "OPR_OR" then
+		self:goiffalse(ao, v)
+	elseif a8 == "OPR_CONCAT" then
+		self:exp2nextreg(ao, v)
+	elseif
+		a8 == "OPR_ADD" or a8 == "OPR_SUB" or a8 == "OPR_MUL" or a8 == "OPR_DIV" or a8 == "OPR_MOD" or a8 == "OPR_POW"
+	then
+		if not self:isnumeral(v) then
+			self:exp2RK(ao, v)
+		end
+	else
+		self:exp2RK(ao, v)
+	end
+end
+f.arith_op = {
+	OPR_ADD = "OP_ADD",
+	OPR_SUB = "OP_SUB",
+	OPR_MUL = "OP_MUL",
+	OPR_DIV = "OP_DIV",
+	OPR_MOD = "OP_MOD",
+	OPR_POW = "OP_POW"
+}
+f.comp_op = {OPR_EQ = "OP_EQ", OPR_NE = "OP_EQ", OPR_LT = "OP_LT", OPR_LE = "OP_LE", OPR_GT = "OP_LT", OPR_GE = "OP_LE"}
+f.comp_cond = {OPR_EQ = 1, OPR_NE = 0, OPR_LT = 1, OPR_LE = 1, OPR_GT = 0, OPR_GE = 0}
+function f:posfix(ao, a8, b5, b6)
+	local function bb(b5, b6)
+		b5.k = b6.k
+		b5.info = b6.info
+		b5.aux = b6.aux
+		b5.nval = b6.nval
+		b5.t = b6.t
+		b5.f = b6.f
+	end
+	if a8 == "OPR_AND" then
+		h(b5.t == self.NO_JUMP)
+		self:dischargevars(ao, b6)
+		b6.f = self:concat(ao, b6.f, b5.f)
+		bb(b5, b6)
+	elseif a8 == "OPR_OR" then
+		h(b5.f == self.NO_JUMP)
+		self:dischargevars(ao, b6)
+		b6.t = self:concat(ao, b6.t, b5.t)
+		bb(b5, b6)
+	elseif a8 == "OPR_CONCAT" then
+		self:exp2val(ao, b6)
+		if b6.k == "VRELOCABLE" and d:GET_OPCODE(self:getcode(ao, b6)) == "OP_CONCAT" then
+			h(b5.info == d:GETARG_B(self:getcode(ao, b6)) - 1)
+			self:freeexp(ao, b5)
+			d:SETARG_B(self:getcode(ao, b6), b5.info)
+			b5.k = "VRELOCABLE"
+			b5.info = b6.info
+		else
+			self:exp2nextreg(ao, b6)
+			self:codearith(ao, "OP_CONCAT", b5, b6)
+		end
+	else
+		local bc = self.arith_op[a8]
+		if bc then
+			self:codearith(ao, bc, b5, b6)
+		else
+			local bd = self.comp_op[a8]
+			if bd then
+				self:codecomp(ao, bd, self.comp_cond[a8], b5, b6)
+			else
+				h(0)
+			end
+		end
+	end
+end
+function f:fixline(ao, be)
+	ao.f.lineinfo[ao.pc - 1] = be
+end
+function f:code(ao, W, be)
+	local ak = ao.f
+	self:dischargejpc(ao)
+	b:growvector(ao.L, ak.code, ao.pc, ak.sizecode, nil, b.MAX_INT, "code size overflow")
+	ak.code[ao.pc] = W
+	b:growvector(ao.L, ak.lineinfo, ao.pc, ak.sizelineinfo, nil, b.MAX_INT, "code size overflow")
+	ak.lineinfo[ao.pc] = be
+	local aA = ao.pc
+	ao.pc = ao.pc + 1
+	return aA
+end
+function f:codeABC(ao, Y, _, k, L)
+	h(d:getOpMode(Y) == d.OpMode.iABC)
+	h(d:getBMode(Y) ~= d.OpArgMask.OpArgN or k == 0)
+	h(d:getCMode(Y) ~= d.OpArgMask.OpArgN or L == 0)
+	return self:code(ao, d:CREATE_ABC(Y, _, k, L), ao.ls.lastline)
+end
+function f:codeABx(ao, Y, _, a0)
+	h(d:getOpMode(Y) == d.OpMode.iABx or d:getOpMode(Y) == d.OpMode.iAsBx)
+	h(d:getCMode(Y) == d.OpArgMask.OpArgN)
+	return self:code(ao, d:CREATE_ABx(Y, _, a0), ao.ls.lastline)
+end
+function f:setlist(ao, bf, bg, bh)
+	local L = math.floor((bg - 1) / d.LFIELDS_PER_FLUSH) + 1
+	local k = bh == b.LUA_MULTRET and 0 or bh
+	h(bh ~= 0)
+	if L <= d.MAXARG_C then
+		self:codeABC(ao, "OP_SETLIST", bf, k, L)
+	else
+		self:codeABC(ao, "OP_SETLIST", bf, k, 0)
+		self:code(ao, d:CREATE_Inst(L), ao.ls.lastline)
+	end
+	ao.freereg = bf + 1
+end
+b.LUA_QS = c.LUA_QS or "'%s'"
+b.SHRT_MAX = 32767
+b.LUAI_MAXVARS = 200
+b.LUAI_MAXUPVALUES = 60
+b.MAX_INT = c.MAX_INT or 2147483645
+b.LUAI_MAXCCALLS = 200
+b.VARARG_HASARG = 1
+b.HASARG_MASK = 2
+b.VARARG_ISVARARG = 2
+b.VARARG_NEEDSARG = 4
+b.LUA_MULTRET = -1
+function b:LUA_QL(a6)
+	return "'" .. a6 .. "'"
+end
+function b:growvector(J, v, bg, bi, ab, bj, ap)
+	if bg >= bj then
+		error(ap)
+	end
+end
+function b:newproto(J)
+	local ak = {}
+	ak.k = {}
+	ak.sizek = 0
+	ak.p = {}
+	ak.sizep = 0
+	ak.code = {}
+	ak.sizecode = 0
+	ak.sizelineinfo = 0
+	ak.sizeupvalues = 0
+	ak.nups = 0
+	ak.upvalues = {}
+	ak.numparams = 0
+	ak.is_vararg = 0
+	ak.maxstacksize = 0
+	ak.lineinfo = {}
+	ak.sizelocvars = 0
+	ak.locvars = {}
+	ak.lineDefined = 0
+	ak.lastlinedefined = 0
+	ak.source = nil
+	return ak
+end
+function b:int2fb(a6)
+	local ap = 0
+	while a6 >= 16 do
+		a6 = math.floor((a6 + 1) / 2)
+		ap = ap + 1
+	end
+	if a6 < 8 then
+		return a6
+	else
+		return (ap + 1) * 8 + a6 - 8
+	end
+end
+function b:hasmultret(aQ)
+	return aQ == "VCALL" or aQ == "VVARARG"
+end
+function b:getlocvar(ao, W)
+	return ao.f.locvars[ao.actvar[W]]
+end
+function b:checklimit(ao, v, C, aa)
+	if v > C then
+		self:errorlimit(ao, C, aa)
+	end
+end
+function b:anchor_token(E)
+	if E.t.token == "TK_NAME" or E.t.token == "TK_STRING" then
+	end
+end
+function b:error_expected(E, F)
+	c:syntaxerror(E, string.format(self.LUA_QS .. " expected", c:token2str(E, F)))
+end
+function b:errorlimit(ao, bj, bk)
+	local G =
+		ao.f.linedefined == 0 and string.format("main function has more than %d %s", bj, bk) or
+		string.format("function at line %d has more than %d %s", ao.f.linedefined, bj, bk)
+	c:lexerror(ao.ls, G, 0)
+end
+function b:testnext(E, L)
+	if E.t.token == L then
+		c:next(E)
+		return true
+	else
+		return false
+	end
+end
+function b:check(E, L)
+	if E.t.token ~= L then
+		self:error_expected(E, L)
+	end
+end
+function b:checknext(E, L)
+	self:check(E, L)
+	c:next(E)
+end
+function b:check_condition(E, L, G)
+	if not L then
+		c:syntaxerror(E, G)
+	end
+end
+function b:check_match(E, bk, bl, bm)
+	if not self:testnext(E, bk) then
+		if bm == E.linenumber then
+			self:error_expected(E, bk)
+		else
+			c:syntaxerror(
+				E,
+				string.format(
+					self.LUA_QS .. " expected (to close " .. self.LUA_QS .. " at line %d)",
+					c:token2str(E, bk),
+					c:token2str(E, bl),
+					bm
+				)
+			)
+		end
+	end
+end
+function b:str_checkname(E)
+	self:check(E, "TK_NAME")
+	local X = E.t.seminfo
+	c:next(E)
+	return X
+end
+function b:init_exp(ap, aQ, W)
+	ap.f, ap.t = f.NO_JUMP, f.NO_JUMP
+	ap.k = aQ
+	ap.info = W
+end
+function b:codestring(E, ap, M)
+	self:init_exp(ap, "VK", f:stringK(E.fs, M))
+end
+function b:checkname(E, ap)
+	self:codestring(E, ap, self:str_checkname(E))
+end
+function b:registerlocalvar(E, bn)
+	local ao = E.fs
+	local ak = ao.f
+	self:growvector(E.L, ak.locvars, ao.nlocvars, ak.sizelocvars, nil, self.SHRT_MAX, "too many local variables")
+	ak.locvars[ao.nlocvars] = {}
+	ak.locvars[ao.nlocvars].varname = bn
+	local bo = ao.nlocvars
+	ao.nlocvars = ao.nlocvars + 1
+	return bo
+end
+function b:new_localvarliteral(E, v, r)
+	self:new_localvar(E, v, r)
+end
+function b:new_localvar(E, bp, r)
+	local ao = E.fs
+	self:checklimit(ao, ao.nactvar + r + 1, self.LUAI_MAXVARS, "local variables")
+	ao.actvar[ao.nactvar + r] = self:registerlocalvar(E, bp)
+end
+function b:adjustlocalvars(E, bq)
+	local ao = E.fs
+	ao.nactvar = ao.nactvar + bq
+	for W = bq, 1, -1 do
+		self:getlocvar(ao, ao.nactvar - W).startpc = ao.pc
+	end
+end
+function b:removevars(E, br)
+	local ao = E.fs
+	while ao.nactvar > br do
+		ao.nactvar = ao.nactvar - 1
+		self:getlocvar(ao, ao.nactvar).endpc = ao.pc
+	end
+end
+function b:indexupvalue(ao, bp, v)
+	local ak = ao.f
+	for W = 0, ak.nups - 1 do
+		if ao.upvalues[W].k == v.k and ao.upvalues[W].info == v.info then
+			h(ak.upvalues[W] == bp)
+			return W
+		end
+	end
+	self:checklimit(ao, ak.nups + 1, self.LUAI_MAXUPVALUES, "upvalues")
+	self:growvector(ao.L, ak.upvalues, ak.nups, ak.sizeupvalues, nil, self.MAX_INT, "")
+	ak.upvalues[ak.nups] = bp
+	h(v.k == "VLOCAL" or v.k == "VUPVAL")
+	ao.upvalues[ak.nups] = {k = v.k, info = v.info}
+	local bs = ak.nups
+	ak.nups = ak.nups + 1
+	return bs
+end
+function b:searchvar(ao, r)
+	for W = ao.nactvar - 1, 0, -1 do
+		if r == self:getlocvar(ao, W).varname then
+			return W
+		end
+	end
+	return -1
+end
+function b:markupval(ao, bt)
+	local bu = ao.bl
+	while bu and bu.nactvar > bt do
+		bu = bu.previous
+	end
+	if bu then
+		bu.upval = true
+	end
+end
+function b:singlevaraux(ao, r, a_, bf)
+	if ao == nil then
+		self:init_exp(a_, "VGLOBAL", d.NO_REG)
+		return "VGLOBAL"
+	else
+		local v = self:searchvar(ao, r)
+		if v >= 0 then
+			self:init_exp(a_, "VLOCAL", v)
+			if bf == 0 then
+				self:markupval(ao, v)
+			end
+			return "VLOCAL"
+		else
+			if self:singlevaraux(ao.prev, r, a_, 0) == "VGLOBAL" then
+				return "VGLOBAL"
+			end
+			a_.info = self:indexupvalue(ao, r, a_)
+			a_.k = "VUPVAL"
+			return "VUPVAL"
+		end
+	end
+end
+function b:singlevar(E, a_)
+	local bn = self:str_checkname(E)
+	local ao = E.fs
+	if self:singlevaraux(ao, bn, a_, 1) == "VGLOBAL" then
+		a_.info = f:stringK(ao, bn)
+	end
+end
+function b:adjust_assign(E, bq, bv, ap)
+	local ao = E.fs
+	local bw = bq - bv
+	if self:hasmultret(ap.k) then
+		bw = bw + 1
+		if bw <= 0 then
+			bw = 0
+		end
+		f:setreturns(ao, ap, bw)
+		if bw > 1 then
+			f:reserveregs(ao, bw - 1)
+		end
+	else
+		if ap.k ~= "VVOID" then
+			f:exp2nextreg(ao, ap)
+		end
+		if bw > 0 then
+			local aI = ao.freereg
+			f:reserveregs(ao, bw)
+			f:_nil(ao, aI, bw)
+		end
+	end
+end
+function b:enterlevel(E)
+	E.L.nCcalls = E.L.nCcalls + 1
+	if E.L.nCcalls > self.LUAI_MAXCCALLS then
+		c:lexerror(E, "chunk has too many syntax levels", 0)
+	end
+end
+function b:leavelevel(E)
+	E.L.nCcalls = E.L.nCcalls - 1
+end
+function b:enterblock(ao, bu, bx)
+	bu.breaklist = f.NO_JUMP
+	bu.isbreakable = bx
+	bu.nactvar = ao.nactvar
+	bu.upval = false
+	bu.previous = ao.bl
+	ao.bl = bu
+	h(ao.freereg == ao.nactvar)
+end
+function b:leaveblock(ao)
+	local bu = ao.bl
+	ao.bl = bu.previous
+	self:removevars(ao.ls, bu.nactvar)
+	if bu.upval then
+		f:codeABC(ao, "OP_CLOSE", bu.nactvar, 0, 0)
+	end
+	h(not bu.isbreakable or not bu.upval)
+	h(bu.nactvar == ao.nactvar)
+	ao.freereg = ao.nactvar
+	f:patchtohere(ao, bu.breaklist)
+end
+function b:pushclosure(E, b2, v)
+	local ao = E.fs
+	local ak = ao.f
+	self:growvector(E.L, ak.p, ao.np, ak.sizep, nil, d.MAXARG_Bx, "constant table overflow")
+	ak.p[ao.np] = b2.f
+	ao.np = ao.np + 1
+	self:init_exp(v, "VRELOCABLE", f:codeABx(ao, "OP_CLOSURE", 0, ao.np - 1))
+	for W = 0, b2.f.nups - 1 do
+		local Y = b2.upvalues[W].k == "VLOCAL" and "OP_MOVE" or "OP_GETUPVAL"
+		f:codeABC(ao, Y, 0, b2.upvalues[W].info, 0)
+	end
+end
+function b:open_func(E, ao)
+	local J = E.L
+	local ak = self:newproto(E.L)
+	ao.f = ak
+	ao.prev = E.fs
+	ao.ls = E
+	ao.L = J
+	E.fs = ao
+	ao.pc = 0
+	ao.lasttarget = -1
+	ao.jpc = f.NO_JUMP
+	ao.freereg = 0
+	ao.nk = 0
+	ao.np = 0
+	ao.nlocvars = 0
+	ao.nactvar = 0
+	ao.bl = nil
+	ak.source = E.source
+	ak.maxstacksize = 2
+	ao.h = {}
+end
+function b:close_func(E)
+	local J = E.L
+	local ao = E.fs
+	local ak = ao.f
+	self:removevars(E, 0)
+	f:ret(ao, 0, 0)
+	ak.sizecode = ao.pc
+	ak.sizelineinfo = ao.pc
+	ak.sizek = ao.nk
+	ak.sizep = ao.np
+	ak.sizelocvars = ao.nlocvars
+	ak.sizeupvalues = ak.nups
+	h(ao.bl == nil)
+	E.fs = ao.prev
+	if ao then
+		self:anchor_token(E)
+	end
+end
+function b:parser(J, q, j, bp)
+	local by = {}
+	by.t = {}
+	by.lookahead = {}
+	local bz = {}
+	bz.upvalues = {}
+	bz.actvar = {}
+	J.nCcalls = 0
+	by.buff = j
+	c:setinput(J, by, q, bp)
+	self:open_func(by, bz)
+	bz.f.is_vararg = self.VARARG_ISVARARG
+	c:next(by)
+	self:chunk(by)
+	self:check(by, "TK_EOS")
+	self:close_func(by)
+	h(bz.prev == nil)
+	h(bz.f.nups == 0)
+	h(by.fs == nil)
+	return bz.f
+end
+function b:field(E, v)
+	local ao = E.fs
+	local b1 = {}
+	f:exp2anyreg(ao, v)
+	c:next(E)
+	self:checkname(E, b1)
+	f:indexed(ao, v, b1)
+end
+function b:yindex(E, v)
+	c:next(E)
+	self:expr(E, v)
+	f:exp2val(E.fs, v)
+	self:checknext(E, "]")
+end
+function b:recfield(E, bA)
+	local ao = E.fs
+	local aI = E.fs.freereg
+	local b1, bB = {}, {}
+	if E.t.token == "TK_NAME" then
+		self:checklimit(ao, bA.nh, self.MAX_INT, "items in a constructor")
+		self:checkname(E, b1)
+	else
+		self:yindex(E, b1)
+	end
+	bA.nh = bA.nh + 1
+	self:checknext(E, "=")
+	local bC = f:exp2RK(ao, b1)
+	self:expr(E, bB)
+	f:codeABC(ao, "OP_SETTABLE", bA.t.info, bC, f:exp2RK(ao, bB))
+	ao.freereg = aI
+end
+function b:closelistfield(ao, bA)
+	if bA.v.k == "VVOID" then
+		return
+	end
+	f:exp2nextreg(ao, bA.v)
+	bA.v.k = "VVOID"
+	if bA.tostore == d.LFIELDS_PER_FLUSH then
+		f:setlist(ao, bA.t.info, bA.na, bA.tostore)
+		bA.tostore = 0
+	end
+end
+function b:lastlistfield(ao, bA)
+	if bA.tostore == 0 then
+		return
+	end
+	if self:hasmultret(bA.v.k) then
+		f:setmultret(ao, bA.v)
+		f:setlist(ao, bA.t.info, bA.na, self.LUA_MULTRET)
+		bA.na = bA.na - 1
+	else
+		if bA.v.k ~= "VVOID" then
+			f:exp2nextreg(ao, bA.v)
+		end
+		f:setlist(ao, bA.t.info, bA.na, bA.tostore)
+	end
+end
+function b:listfield(E, bA)
+	self:expr(E, bA.v)
+	self:checklimit(E.fs, bA.na, self.MAX_INT, "items in a constructor")
+	bA.na = bA.na + 1
+	bA.tostore = bA.tostore + 1
+end
+function b:constructor(E, ab)
+	local ao = E.fs
+	local be = E.linenumber
+	local aA = f:codeABC(ao, "OP_NEWTABLE", 0, 0, 0)
+	local bA = {}
+	bA.v = {}
+	bA.na, bA.nh, bA.tostore = 0, 0, 0
+	bA.t = ab
+	self:init_exp(ab, "VRELOCABLE", aA)
+	self:init_exp(bA.v, "VVOID", 0)
+	f:exp2nextreg(E.fs, ab)
+	self:checknext(E, "{")
+	repeat
+		h(bA.v.k == "VVOID" or bA.tostore > 0)
+		if E.t.token == "}" then
+			break
+		end
+		self:closelistfield(ao, bA)
+		local L = E.t.token
+		if L == "TK_NAME" then
+			c:lookahead(E)
+			if E.lookahead.token ~= "=" then
+				self:listfield(E, bA)
+			else
+				self:recfield(E, bA)
+			end
+		elseif L == "[" then
+			self:recfield(E, bA)
+		else
+			self:listfield(E, bA)
+		end
+	until not self:testnext(E, ",") and not self:testnext(E, ";")
+	self:check_match(E, "}", "{", be)
+	self:lastlistfield(ao, bA)
+	d:SETARG_B(ao.f.code[aA], self:int2fb(bA.na))
+	d:SETARG_C(ao.f.code[aA], self:int2fb(bA.nh))
+end
+function b:parlist(E)
+	local ao = E.fs
+	local ak = ao.f
+	local bD = 0
+	ak.is_vararg = 0
+	if E.t.token ~= ")" then
+		repeat
+			local L = E.t.token
+			if L == "TK_NAME" then
+				self:new_localvar(E, self:str_checkname(E), bD)
+				bD = bD + 1
+			elseif L == "TK_DOTS" then
+				c:next(E)
+				self:new_localvarliteral(E, "arg", bD)
+				bD = bD + 1
+				ak.is_vararg = self.VARARG_HASARG + self.VARARG_NEEDSARG
+				ak.is_vararg = ak.is_vararg + self.VARARG_ISVARARG
+			else
+				c:syntaxerror(E, "<name> or " .. self:LUA_QL("...") .. " expected")
+			end
+		until ak.is_vararg ~= 0 or not self:testnext(E, ",")
+	end
+	self:adjustlocalvars(E, bD)
+	ak.numparams = ao.nactvar - ak.is_vararg % self.HASARG_MASK
+	f:reserveregs(ao, ao.nactvar)
+end
+function b:body(E, ap, bE, be)
+	local bF = {}
+	bF.upvalues = {}
+	bF.actvar = {}
+	self:open_func(E, bF)
+	bF.f.lineDefined = be
+	self:checknext(E, "(")
+	if bE then
+		self:new_localvarliteral(E, "self", 0)
+		self:adjustlocalvars(E, 1)
+	end
+	self:parlist(E)
+	self:checknext(E, ")")
+	self:chunk(E)
+	bF.f.lastlinedefined = E.linenumber
+	self:check_match(E, "TK_END", "TK_FUNCTION", be)
+	self:close_func(E)
+	self:pushclosure(E, bF, ap)
+end
+function b:explist1(E, v)
+	local r = 1
+	self:expr(E, v)
+	while self:testnext(E, ",") do
+		f:exp2nextreg(E.fs, v)
+		self:expr(E, v)
+		r = r + 1
+	end
+	return r
+end
+function b:funcargs(E, ak)
+	local ao = E.fs
+	local bG = {}
+	local bD
+	local be = E.linenumber
+	local L = E.t.token
+	if L == "(" then
+		if be ~= E.lastline then
+			c:syntaxerror(E, "ambiguous syntax (function call x new statement)")
+		end
+		c:next(E)
+		if E.t.token == ")" then
+			bG.k = "VVOID"
+		else
+			self:explist1(E, bG)
+			f:setmultret(ao, bG)
+		end
+		self:check_match(E, ")", "(", be)
+	elseif L == "{" then
+		self:constructor(E, bG)
+	elseif L == "TK_STRING" then
+		self:codestring(E, bG, E.t.seminfo)
+		c:next(E)
+	else
+		c:syntaxerror(E, "function arguments expected")
+		return
+	end
+	h(ak.k == "VNONRELOC")
+	local bf = ak.info
+	if self:hasmultret(bG.k) then
+		bD = self.LUA_MULTRET
+	else
+		if bG.k ~= "VVOID" then
+			f:exp2nextreg(ao, bG)
+		end
+		bD = ao.freereg - (bf + 1)
+	end
+	self:init_exp(ak, "VCALL", f:codeABC(ao, "OP_CALL", bf, bD + 1, 2))
+	f:fixline(ao, be)
+	ao.freereg = bf + 1
+end
+function b:prefixexp(E, v)
+	local L = E.t.token
+	if L == "(" then
+		local be = E.linenumber
+		c:next(E)
+		self:expr(E, v)
+		self:check_match(E, ")", "(", be)
+		f:dischargevars(E.fs, v)
+	elseif L == "TK_NAME" then
+		self:singlevar(E, v)
+	else
+		c:syntaxerror(E, "unexpected symbol")
+	end
+	return
+end
+function b:primaryexp(E, v)
+	local ao = E.fs
+	self:prefixexp(E, v)
+	while true do
+		local L = E.t.token
+		if L == "." then
+			self:field(E, v)
+		elseif L == "[" then
+			local b1 = {}
+			f:exp2anyreg(ao, v)
+			self:yindex(E, b1)
+			f:indexed(ao, v, b1)
+		elseif L == ":" then
+			local b1 = {}
+			c:next(E)
+			self:checkname(E, b1)
+			f:_self(ao, v, b1)
+			self:funcargs(E, v)
+		elseif L == "(" or L == "TK_STRING" or L == "{" then
+			f:exp2nextreg(ao, v)
+			self:funcargs(E, v)
+		else
+			return
+		end
+	end
+end
+function b:simpleexp(E, v)
+	local L = E.t.token
+	if L == "TK_NUMBER" then
+		self:init_exp(v, "VKNUM", 0)
+		v.nval = E.t.seminfo
+	elseif L == "TK_STRING" then
+		self:codestring(E, v, E.t.seminfo)
+	elseif L == "TK_NIL" then
+		self:init_exp(v, "VNIL", 0)
+	elseif L == "TK_TRUE" then
+		self:init_exp(v, "VTRUE", 0)
+	elseif L == "TK_FALSE" then
+		self:init_exp(v, "VFALSE", 0)
+	elseif L == "TK_DOTS" then
+		local ao = E.fs
+		self:check_condition(
+			E,
+			ao.f.is_vararg ~= 0,
+			"cannot use " .. self:LUA_QL("...") .. " outside a vararg function"
+		)
+		local bH = ao.f.is_vararg
+		if bH >= self.VARARG_NEEDSARG then
+			ao.f.is_vararg = bH - self.VARARG_NEEDSARG
+		end
+		self:init_exp(v, "VVARARG", f:codeABC(ao, "OP_VARARG", 0, 1, 0))
+	elseif L == "{" then
+		self:constructor(E, v)
+		return
+	elseif L == "TK_FUNCTION" then
+		c:next(E)
+		self:body(E, v, false, E.linenumber)
+		return
+	else
+		self:primaryexp(E, v)
+		return
+	end
+	c:next(E)
+end
+function b:getunopr(a8)
+	if a8 == "TK_NOT" then
+		return "OPR_NOT"
+	elseif a8 == "-" then
+		return "OPR_MINUS"
+	elseif a8 == "#" then
+		return "OPR_LEN"
+	else
+		return "OPR_NOUNOPR"
+	end
+end
+b.getbinopr_table = {
+	["+"] = "OPR_ADD",
+	["-"] = "OPR_SUB",
+	["*"] = "OPR_MUL",
+	["/"] = "OPR_DIV",
+	["%"] = "OPR_MOD",
+	["^"] = "OPR_POW",
+	["TK_CONCAT"] = "OPR_CONCAT",
+	["TK_NE"] = "OPR_NE",
+	["TK_EQ"] = "OPR_EQ",
+	["<"] = "OPR_LT",
+	["TK_LE"] = "OPR_LE",
+	[">"] = "OPR_GT",
+	["TK_GE"] = "OPR_GE",
+	["TK_AND"] = "OPR_AND",
+	["TK_OR"] = "OPR_OR"
+}
+function b:getbinopr(a8)
+	local bI = self.getbinopr_table[a8]
+	if bI then
+		return bI
+	else
+		return "OPR_NOBINOPR"
+	end
+end
+b.priority = {
+	{6, 6},
+	{6, 6},
+	{7, 7},
+	{7, 7},
+	{7, 7},
+	{10, 9},
+	{5, 4},
+	{3, 3},
+	{3, 3},
+	{3, 3},
+	{3, 3},
+	{3, 3},
+	{3, 3},
+	{2, 2},
+	{1, 1}
+}
+b.UNARY_PRIORITY = 8
+function b:subexpr(E, v, bj)
+	self:enterlevel(E)
+	local bJ = self:getunopr(E.t.token)
+	if bJ ~= "OPR_NOUNOPR" then
+		c:next(E)
+		self:subexpr(E, v, self.UNARY_PRIORITY)
+		f:prefix(E.fs, bJ, v)
+	else
+		self:simpleexp(E, v)
+	end
+	local a8 = self:getbinopr(E.t.token)
+	while a8 ~= "OPR_NOBINOPR" and self.priority[f.BinOpr[a8] + 1][1] > bj do
+		local b8 = {}
+		c:next(E)
+		f:infix(E.fs, a8, v)
+		local bK = self:subexpr(E, b8, self.priority[f.BinOpr[a8] + 1][2])
+		f:posfix(E.fs, a8, v, b8)
+		a8 = bK
+	end
+	self:leavelevel(E)
+	return a8
+end
+function b:expr(E, v)
+	self:subexpr(E, v, 0)
+end
+function b:block_follow(F)
+	if F == "TK_ELSE" or F == "TK_ELSEIF" or F == "TK_END" or F == "TK_UNTIL" or F == "TK_EOS" then
+		return true
+	else
+		return false
+	end
+end
+function b:block(E)
+	local ao = E.fs
+	local bu = {}
+	self:enterblock(ao, bu, false)
+	self:chunk(E)
+	h(bu.breaklist == f.NO_JUMP)
+	self:leaveblock(ao)
+end
+function b:check_conflict(E, bL, v)
+	local ao = E.fs
+	local bw = ao.freereg
+	local bM = false
+	while bL do
+		if bL.v.k == "VINDEXED" then
+			if bL.v.info == v.info then
+				bM = true
+				bL.v.info = bw
+			end
+			if bL.v.aux == v.info then
+				bM = true
+				bL.v.aux = bw
+			end
+		end
+		bL = bL.prev
+	end
+	if bM then
+		f:codeABC(ao, "OP_MOVE", ao.freereg, v.info, 0)
+		f:reserveregs(ao, 1)
+	end
+end
+function b:assignment(E, bL, bq)
+	local ap = {}
+	local L = bL.v.k
+	self:check_condition(E, L == "VLOCAL" or L == "VUPVAL" or L == "VGLOBAL" or L == "VINDEXED", "syntax error")
+	if self:testnext(E, ",") then
+		local bN = {}
+		bN.v = {}
+		bN.prev = bL
+		self:primaryexp(E, bN.v)
+		if bN.v.k == "VLOCAL" then
+			self:check_conflict(E, bL, bN.v)
+		end
+		self:checklimit(E.fs, bq, self.LUAI_MAXCCALLS - E.L.nCcalls, "variables in assignment")
+		self:assignment(E, bN, bq + 1)
+	else
+		self:checknext(E, "=")
+		local bv = self:explist1(E, ap)
+		if bv ~= bq then
+			self:adjust_assign(E, bq, bv, ap)
+			if bv > bq then
+				E.fs.freereg = E.fs.freereg - (bv - bq)
+			end
+		else
+			f:setoneret(E.fs, ap)
+			f:storevar(E.fs, bL.v, ap)
+			return
+		end
+	end
+	self:init_exp(ap, "VNONRELOC", E.fs.freereg - 1)
+	f:storevar(E.fs, bL.v, ap)
+end
+function b:cond(E)
+	local v = {}
+	self:expr(E, v)
+	if v.k == "VNIL" then
+		v.k = "VFALSE"
+	end
+	f:goiftrue(E.fs, v)
+	return v.f
+end
+function b:breakstat(E)
+	local ao = E.fs
+	local bu = ao.bl
+	local bO = false
+	while bu and not bu.isbreakable do
+		if bu.upval then
+			bO = true
+		end
+		bu = bu.previous
+	end
+	if not bu then
+		c:syntaxerror(E, "no loop to break")
+	end
+	if bO then
+		f:codeABC(ao, "OP_CLOSE", bu.nactvar, 0, 0)
+	end
+	bu.breaklist = f:concat(ao, bu.breaklist, f:jump(ao))
+end
+function b:whilestat(E, be)
+	local ao = E.fs
+	local bu = {}
+	c:next(E)
+	local bP = f:getlabel(ao)
+	local bQ = self:cond(E)
+	self:enterblock(ao, bu, true)
+	self:checknext(E, "TK_DO")
+	self:block(E)
+	f:patchlist(ao, f:jump(ao), bP)
+	self:check_match(E, "TK_END", "TK_WHILE", be)
+	self:leaveblock(ao)
+	f:patchtohere(ao, bQ)
+end
+function b:repeatstat(E, be)
+	local ao = E.fs
+	local bR = f:getlabel(ao)
+	local bS, bT = {}, {}
+	self:enterblock(ao, bS, true)
+	self:enterblock(ao, bT, false)
+	c:next(E)
+	self:chunk(E)
+	self:check_match(E, "TK_UNTIL", "TK_REPEAT", be)
+	local bQ = self:cond(E)
+	if not bT.upval then
+		self:leaveblock(ao)
+		f:patchlist(E.fs, bQ, bR)
+	else
+		self:breakstat(E)
+		f:patchtohere(E.fs, bQ)
+		self:leaveblock(ao)
+		f:patchlist(E.fs, f:jump(ao), bR)
+	end
+	self:leaveblock(ao)
+end
+function b:exp1(E)
+	local ap = {}
+	self:expr(E, ap)
+	local aQ = ap.k
+	f:exp2nextreg(E.fs, ap)
+	return aQ
+end
+function b:forbody(E, bf, be, bq, bU)
+	local bu = {}
+	local ao = E.fs
+	self:adjustlocalvars(E, 3)
+	self:checknext(E, "TK_DO")
+	local bV = bU and f:codeAsBx(ao, "OP_FORPREP", bf, f.NO_JUMP) or f:jump(ao)
+	self:enterblock(ao, bu, false)
+	self:adjustlocalvars(E, bq)
+	f:reserveregs(ao, bq)
+	self:block(E)
+	self:leaveblock(ao)
+	f:patchtohere(ao, bV)
+	local bW = bU and f:codeAsBx(ao, "OP_FORLOOP", bf, f.NO_JUMP) or f:codeABC(ao, "OP_TFORLOOP", bf, 0, bq)
+	f:fixline(ao, be)
+	f:patchlist(ao, bU and bW or f:jump(ao), bV + 1)
+end
+function b:fornum(E, bn, be)
+	local ao = E.fs
+	local bf = ao.freereg
+	self:new_localvarliteral(E, "(for index)", 0)
+	self:new_localvarliteral(E, "(for limit)", 1)
+	self:new_localvarliteral(E, "(for step)", 2)
+	self:new_localvar(E, bn, 3)
+	self:checknext(E, "=")
+	self:exp1(E)
+	self:checknext(E, ",")
+	self:exp1(E)
+	if self:testnext(E, ",") then
+		self:exp1(E)
+	else
+		f:codeABx(ao, "OP_LOADK", ao.freereg, f:numberK(ao, 1))
+		f:reserveregs(ao, 1)
+	end
+	self:forbody(E, bf, be, 1, true)
+end
+function b:forlist(E, bX)
+	local ao = E.fs
+	local ap = {}
+	local bq = 0
+	local bf = ao.freereg
+	self:new_localvarliteral(E, "(for generator)", bq)
+	bq = bq + 1
+	self:new_localvarliteral(E, "(for state)", bq)
+	bq = bq + 1
+	self:new_localvarliteral(E, "(for control)", bq)
+	bq = bq + 1
+	self:new_localvar(E, bX, bq)
+	bq = bq + 1
+	while self:testnext(E, ",") do
+		self:new_localvar(E, self:str_checkname(E), bq)
+		bq = bq + 1
+	end
+	self:checknext(E, "TK_IN")
+	local be = E.linenumber
+	self:adjust_assign(E, 3, self:explist1(E, ap), ap)
+	f:checkstack(ao, 3)
+	self:forbody(E, bf, be, bq - 3, false)
+end
+function b:forstat(E, be)
+	local ao = E.fs
+	local bu = {}
+	self:enterblock(ao, bu, true)
+	c:next(E)
+	local bn = self:str_checkname(E)
+	local L = E.t.token
+	if L == "=" then
+		self:fornum(E, bn, be)
+	elseif L == "," or L == "TK_IN" then
+		self:forlist(E, bn)
+	else
+		c:syntaxerror(E, self:LUA_QL("=") .. " or " .. self:LUA_QL("in") .. " expected")
+	end
+	self:check_match(E, "TK_END", "TK_FOR", be)
+	self:leaveblock(ao)
+end
+function b:test_then_block(E)
+	c:next(E)
+	local bQ = self:cond(E)
+	self:checknext(E, "TK_THEN")
+	self:block(E)
+	return bQ
+end
+function b:ifstat(E, be)
+	local ao = E.fs
+	local bY = f.NO_JUMP
+	local bZ = self:test_then_block(E)
+	while E.t.token == "TK_ELSEIF" do
+		bY = f:concat(ao, bY, f:jump(ao))
+		f:patchtohere(ao, bZ)
+		bZ = self:test_then_block(E)
+	end
+	if E.t.token == "TK_ELSE" then
+		bY = f:concat(ao, bY, f:jump(ao))
+		f:patchtohere(ao, bZ)
+		c:next(E)
+		self:block(E)
+	else
+		bY = f:concat(ao, bY, bZ)
+	end
+	f:patchtohere(ao, bY)
+	self:check_match(E, "TK_END", "TK_IF", be)
+end
+function b:localfunc(E)
+	local v, k = {}, {}
+	local ao = E.fs
+	self:new_localvar(E, self:str_checkname(E), 0)
+	self:init_exp(v, "VLOCAL", ao.freereg)
+	f:reserveregs(ao, 1)
+	self:adjustlocalvars(E, 1)
+	self:body(E, k, false, E.linenumber)
+	f:storevar(ao, v, k)
+	self:getlocvar(ao, ao.nactvar - 1).startpc = ao.pc
+end
+function b:localstat(E)
+	local bq = 0
+	local bv
+	local ap = {}
+	repeat
+		self:new_localvar(E, self:str_checkname(E), bq)
+		bq = bq + 1
+	until not self:testnext(E, ",")
+	if self:testnext(E, "=") then
+		bv = self:explist1(E, ap)
+	else
+		ap.k = "VVOID"
+		bv = 0
+	end
+	self:adjust_assign(E, bq, bv, ap)
+	self:adjustlocalvars(E, bq)
+end
+function b:funcname(E, v)
+	local bE = false
+	self:singlevar(E, v)
+	while E.t.token == "." do
+		self:field(E, v)
+	end
+	if E.t.token == ":" then
+		bE = true
+		self:field(E, v)
+	end
+	return bE
+end
+function b:funcstat(E, be)
+	local v, k = {}, {}
+	c:next(E)
+	local bE = self:funcname(E, v)
+	self:body(E, k, bE, be)
+	f:storevar(E.fs, v, k)
+	f:fixline(E.fs, be)
+end
+function b:exprstat(E)
+	local ao = E.fs
+	local v = {}
+	v.v = {}
+	self:primaryexp(E, v.v)
+	if v.v.k == "VCALL" then
+		d:SETARG_C(f:getcode(ao, v.v), 1)
+	else
+		v.prev = nil
+		self:assignment(E, v, 1)
+	end
+end
+function b:retstat(E)
+	local ao = E.fs
+	local ap = {}
+	local B, ax
+	c:next(E)
+	if self:block_follow(E.t.token) or E.t.token == ";" then
+		B, ax = 0, 0
+	else
+		ax = self:explist1(E, ap)
+		if self:hasmultret(ap.k) then
+			f:setmultret(ao, ap)
+			if ap.k == "VCALL" and ax == 1 then
+				d:SET_OPCODE(f:getcode(ao, ap), "OP_TAILCALL")
+				h(d:GETARG_A(f:getcode(ao, ap)) == ao.nactvar)
+			end
+			B = ao.nactvar
+			ax = self.LUA_MULTRET
+		else
+			if ax == 1 then
+				B = f:exp2anyreg(ao, ap)
+			else
+				f:exp2nextreg(ao, ap)
+				B = ao.nactvar
+				h(ax == ao.freereg - B)
+			end
+		end
+	end
+	f:ret(ao, B, ax)
+end
+function b:statement(E)
+	local be = E.linenumber
+	local L = E.t.token
+	if L == "TK_IF" then
+		self:ifstat(E, be)
+		return false
+	elseif L == "TK_WHILE" then
+		self:whilestat(E, be)
+		return false
+	elseif L == "TK_DO" then
+		c:next(E)
+		self:block(E)
+		self:check_match(E, "TK_END", "TK_DO", be)
+		return false
+	elseif L == "TK_FOR" then
+		self:forstat(E, be)
+		return false
+	elseif L == "TK_REPEAT" then
+		self:repeatstat(E, be)
+		return false
+	elseif L == "TK_FUNCTION" then
+		self:funcstat(E, be)
+		return false
+	elseif L == "TK_LOCAL" then
+		c:next(E)
+		if self:testnext(E, "TK_FUNCTION") then
+			self:localfunc(E)
+		else
+			self:localstat(E)
+		end
+		return false
+	elseif L == "TK_RETURN" then
+		self:retstat(E)
+		return true
+	elseif L == "TK_BREAK" then
+		c:next(E)
+		self:breakstat(E)
+		return true
+	else
+		self:exprstat(E)
+		return false
+	end
+end
+function b:chunk(E)
+	local b_ = false
+	self:enterlevel(E)
+	while not b_ and not self:block_follow(E.t.token) do
+		b_ = self:statement(E)
+		self:testnext(E, ";")
+		h(E.fs.f.maxstacksize >= E.fs.freereg and E.fs.freereg >= E.fs.nactvar)
+		E.fs.freereg = E.fs.nactvar
+	end
+	self:leavelevel(E)
+end
+c:init()
+local c0 = {}
+local function compile(m, bp)
+	local c1 = a:init(a:make_getF(m), nil)
+	if not c1 then
+		return
+	end
+	local b2 = b:parser(c0, c1, nil, "@" .. bp)
+	local ac, j = e:make_setS()
+	e:dump(c0, b2, ac, j)
+	return j.data
+end
+
+--[[
+FiOne
+Copyright (C) 2021  Rerumu
+]]--
+local bit = bit32
+local lua_bc_to_state
+local lua_wrap_state
+local stm_lua_func
+
+-- SETLIST config
+local FIELDS_PER_FLUSH = 50
+
+-- remap for better lookup
+local OPCODE_RM = {
+	-- level 1
+	[22] = 18, -- JMP
+	[31] = 8, -- FORLOOP
+	[33] = 28, -- TFORLOOP
+	-- level 2
+	[0] = 3, -- MOVE
+	[1] = 13, -- LOADK
+	[2] = 23, -- LOADBOOL
+	[26] = 33, -- TEST
+	-- level 3
+	[12] = 1, -- ADD
+	[13] = 6, -- SUB
+	[14] = 10, -- MUL
+	[15] = 16, -- DIV
+	[16] = 20, -- MOD
+	[17] = 26, -- POW
+	[18] = 30, -- UNM
+	[19] = 36, -- NOT
+	-- level 4
+	[3] = 0, -- LOADNIL
+	[4] = 2, -- GETUPVAL
+	[5] = 4, -- GETGLOBAL
+	[6] = 7, -- GETTABLE
+	[7] = 9, -- SETGLOBAL
+	[8] = 12, -- SETUPVAL
+	[9] = 14, -- SETTABLE
+	[10] = 17, -- NEWTABLE
+	[20] = 19, -- LEN
+	[21] = 22, -- CONCAT
+	[23] = 24, -- EQ
+	[24] = 27, -- LT
+	[25] = 29, -- LE
+	[27] = 32, -- TESTSET
+	[32] = 34, -- FORPREP
+	[34] = 37, -- SETLIST
+	-- level 5
+	[11] = 5, -- SELF
+	[28] = 11, -- CALL
+	[29] = 15, -- TAILCALL
+	[30] = 21, -- RETURN
+	[35] = 25, -- CLOSE
+	[36] = 31, -- CLOSURE
+	[37] = 35, -- VARARG
+}
+
+-- opcode types for getting values
+local OPCODE_T = {
+	[0] = 'ABC',
+	'ABx',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABx',
+	'ABC',
+	'ABx',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'AsBx',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABC',
+	'AsBx',
+	'AsBx',
+	'ABC',
+	'ABC',
+	'ABC',
+	'ABx',
+	'ABC',
+}
+
+local OPCODE_M = {
+	[0] = {b = 'OpArgR', c = 'OpArgN'},
+	{b = 'OpArgK', c = 'OpArgN'},
+	{b = 'OpArgU', c = 'OpArgU'},
+	{b = 'OpArgR', c = 'OpArgN'},
+	{b = 'OpArgU', c = 'OpArgN'},
+	{b = 'OpArgK', c = 'OpArgN'},
+	{b = 'OpArgR', c = 'OpArgK'},
+	{b = 'OpArgK', c = 'OpArgN'},
+	{b = 'OpArgU', c = 'OpArgN'},
+	{b = 'OpArgK', c = 'OpArgK'},
+	{b = 'OpArgU', c = 'OpArgU'},
+	{b = 'OpArgR', c = 'OpArgK'},
+	{b = 'OpArgK', c = 'OpArgK'},
+	{b = 'OpArgK', c = 'OpArgK'},
+	{b = 'OpArgK', c = 'OpArgK'},
+	{b = 'OpArgK', c = 'OpArgK'},
+	{b = 'OpArgK', c = 'OpArgK'},
+	{b = 'OpArgK', c = 'OpArgK'},
+	{b = 'OpArgR', c = 'OpArgN'},
+	{b = 'OpArgR', c = 'OpArgN'},
+	{b = 'OpArgR', c = 'OpArgN'},
+	{b = 'OpArgR', c = 'OpArgR'},
+	{b = 'OpArgR', c = 'OpArgN'},
+	{b = 'OpArgK', c = 'OpArgK'},
+	{b = 'OpArgK', c = 'OpArgK'},
+	{b = 'OpArgK', c = 'OpArgK'},
+	{b = 'OpArgR', c = 'OpArgU'},
+	{b = 'OpArgR', c = 'OpArgU'},
+	{b = 'OpArgU', c = 'OpArgU'},
+	{b = 'OpArgU', c = 'OpArgU'},
+	{b = 'OpArgU', c = 'OpArgN'},
+	{b = 'OpArgR', c = 'OpArgN'},
+	{b = 'OpArgR', c = 'OpArgN'},
+	{b = 'OpArgN', c = 'OpArgU'},
+	{b = 'OpArgU', c = 'OpArgU'},
+	{b = 'OpArgN', c = 'OpArgN'},
+	{b = 'OpArgU', c = 'OpArgN'},
+	{b = 'OpArgU', c = 'OpArgN'},
+}
+
+-- int rd_int_basic(string src, int s, int e, int d)
+-- @src - Source binary string
+-- @s - Start index of a little endian integer
+-- @e - End index of the integer
+-- @d - Direction of the loop
+local function rd_int_basic(src, s, e, d)
+	local num = 0
+
+	-- if bb[l] > 127 then -- signed negative
+	-- 	num = num - 256 ^ l
+	-- 	bb[l] = bb[l] - 128
+	-- end
+
+	for i = s, e, d do
+		local mul = 256 ^ math.abs(i - s)
+
+		num += mul * string.byte(src, i, i)
+	end
+
+	return num
+end
+
+-- float rd_flt_basic(byte f1..8)
+-- @f1..4 - The 4 bytes composing a little endian float
+local function rd_flt_basic(f1, f2, f3, f4)
+	local sign = (-1) ^ bit.rshift(f4, 7)
+	local exp = bit.rshift(f3, 7) + bit.lshift(bit.band(f4, 0x7F), 1)
+	local frac = f1 + bit.lshift(f2, 8) + bit.lshift(bit.band(f3, 0x7F), 16)
+	local normal = 1
+
+	if exp == 0 then
+		if frac == 0 then
+			return sign * 0
+		else
+			normal = 0
+			exp = 1
+		end
+	elseif exp == 0x7F then
+		if frac == 0 then
+			return sign * (1 / 0)
+		else
+			return sign * (0 / 0)
+		end
+	end
+
+	return sign * 2 ^ (exp - 127) * (1 + normal / 2 ^ 23)
+end
+
+-- double rd_dbl_basic(byte f1..8)
+-- @f1..8 - The 8 bytes composing a little endian double
+local function rd_dbl_basic(f1, f2, f3, f4, f5, f6, f7, f8)
+	local sign = (-1) ^ bit.rshift(f8, 7)
+	local exp = bit.lshift(bit.band(f8, 0x7F), 4) + bit.rshift(f7, 4)
+	local frac = bit.band(f7, 0x0F) * 2 ^ 48
+	local normal = 1
+
+	frac += (f6 * 2 ^ 40) + (f5 * 2 ^ 32) + (f4 * 2 ^ 24) + (f3 * 2 ^ 16) + (f2 * 2 ^ 8) + f1 -- help
+
+	if exp == 0 then
+		if frac == 0 then
+			return sign * 0
+		else
+			normal = 0
+			exp = 1
+		end
+	elseif exp == 0x7FF then
+		if frac == 0 then
+			return sign * (1 / 0)
+		else
+			return sign * (0 / 0)
+		end
+	end
+
+	return sign * 2 ^ (exp - 1023) * (normal + frac / 2 ^ 52)
+end
+
+-- int rd_int_le(string src, int s, int e)
+-- @src - Source binary string
+-- @s - Start index of a little endian integer
+-- @e - End index of the integer
+local function rd_int_le(src, s, e) return rd_int_basic(src, s, e - 1, 1) end
+
+-- int rd_int_be(string src, int s, int e)
+-- @src - Source binary string
+-- @s - Start index of a big endian integer
+-- @e - End index of the integer
+local function rd_int_be(src, s, e) return rd_int_basic(src, e - 1, s, -1) end
+
+-- float rd_flt_le(string src, int s)
+-- @src - Source binary string
+-- @s - Start index of little endian float
+local function rd_flt_le(src, s) return rd_flt_basic(string.byte(src, s, s + 3)) end
+
+-- float rd_flt_be(string src, int s)
+-- @src - Source binary string
+-- @s - Start index of big endian float
+local function rd_flt_be(src, s)
+	local f1, f2, f3, f4 = string.byte(src, s, s + 3)
+	return rd_flt_basic(f4, f3, f2, f1)
+end
+
+-- double rd_dbl_le(string src, int s)
+-- @src - Source binary string
+-- @s - Start index of little endian double
+local function rd_dbl_le(src, s) return rd_dbl_basic(string.byte(src, s, s + 7)) end
+
+-- double rd_dbl_be(string src, int s)
+-- @src - Source binary string
+-- @s - Start index of big endian double
+local function rd_dbl_be(src, s)
+	local f1, f2, f3, f4, f5, f6, f7, f8 = string.byte(src, s, s + 7) -- same
+	return rd_dbl_basic(f8, f7, f6, f5, f4, f3, f2, f1)
+end
+
+-- to avoid nested ifs in deserializing
+local float_types = {
+	[4] = {little = rd_flt_le, big = rd_flt_be},
+	[8] = {little = rd_dbl_le, big = rd_dbl_be},
+}
+
+-- byte stm_byte(Stream S)
+-- @S - Stream object to read from
+local function stm_byte(S)
+	local idx = S.index
+	local bt = string.byte(S.source, idx, idx)
+
+	S.index = idx + 1
+	return bt
+end
+
+-- string stm_string(Stream S, int len)
+-- @S - Stream object to read from
+-- @len - Length of string being read
+local function stm_string(S, len)
+	local pos = S.index + len
+	local str = string.sub(S.source, S.index, pos - 1)
+
+	S.index = pos
+	return str
+end
+
+-- string stm_lstring(Stream S)
+-- @S - Stream object to read from
+local function stm_lstring(S)
+	local len = S:s_szt()
+	local str
+
+	if len ~= 0 then str = string.sub(stm_string(S, len), 1, -2) end
+
+	return str
+end
+
+-- fn cst_int_rdr(string src, int len, fn func)
+-- @len - Length of type for reader
+-- @func - Reader callback
+local function cst_int_rdr(len, func)
+	return function(S)
+		local pos = S.index + len
+		local int = func(S.source, S.index, pos)
+		S.index = pos
+
+		return int
+	end
+end
+
+-- fn cst_flt_rdr(string src, int len, fn func)
+-- @len - Length of type for reader
+-- @func - Reader callback
+local function cst_flt_rdr(len, func)
+	return function(S)
+		local flt = func(S.source, S.index)
+		S.index = S.index + len
+
+		return flt
+	end
+end
+
+local function stm_inst_list(S)
+	local len = S:s_int()
+	local list = table.create(len)
+
+	for i = 1, len do
+		local ins = S:s_ins()
+		local op = bit.band(ins, 0x3F)
+		local args = OPCODE_T[op]
+		local mode = OPCODE_M[op]
+		local data = {value = ins, op = OPCODE_RM[op], A = bit.band(bit.rshift(ins, 6), 0xFF)}
+
+		if args == 'ABC' then
+			data.B = bit.band(bit.rshift(ins, 23), 0x1FF)
+			data.C = bit.band(bit.rshift(ins, 14), 0x1FF)
+			data.is_KB = mode.b == 'OpArgK' and data.B > 0xFF -- post process optimization
+			data.is_KC = mode.c == 'OpArgK' and data.C > 0xFF
+
+			if op == 10 then -- decode NEWTABLE array size, store it as constant value
+				local e = bit.band(bit.rshift(data.B, 3), 31)
+				if e == 0 then
+					data.const = data.B
+				else
+					data.const = bit.lshift(bit.band(data.B, 7) + 8, e - 1)
+				end
+			end
+		elseif args == 'ABx' then
+			data.Bx = bit.band(bit.rshift(ins, 14), 0x3FFFF)
+			data.is_K = mode.b == 'OpArgK'
+		elseif args == 'AsBx' then
+			data.sBx = bit.band(bit.rshift(ins, 14), 0x3FFFF) - 131071
+		end
+
+		list[i] = data
+	end
+
+	return list
+end
+
+local function stm_const_list(S)
+	local len = S:s_int()
+	local list = table.create(len)
+
+	for i = 1, len do
+		local tt = stm_byte(S)
+		local k
+
+		if tt == 1 then
+			k = stm_byte(S) ~= 0
+		elseif tt == 3 then
+			k = S:s_num()
+		elseif tt == 4 then
+			k = stm_lstring(S)
+		end
+
+		list[i] = k -- offset +1 during instruction decode
+	end
+
+	return list
+end
+
+local function stm_sub_list(S, src)
+	local len = S:s_int()
+	local list = table.create(len)
+
+	for i = 1, len do
+		list[i] = stm_lua_func(S, src) -- offset +1 in CLOSURE
+	end
+
+	return list
+end
+
+local function stm_line_list(S)
+	local len = S:s_int()
+	local list = table.create(len)
+
+	for i = 1, len do list[i] = S:s_int() end
+
+	return list
+end
+
+local function stm_loc_list(S)
+	local len = S:s_int()
+	local list = table.create(len)
+
+	for i = 1, len do list[i] = {varname = stm_lstring(S), startpc = S:s_int(), endpc = S:s_int()} end
+
+	return list
+end
+
+local function stm_upval_list(S)
+	local len = S:s_int()
+	local list = table.create(len)
+
+	for i = 1, len do list[i] = stm_lstring(S) end
+
+	return list
+end
+
+function stm_lua_func(S, psrc)
+	local proto = {}
+	local src = stm_lstring(S) or psrc -- source is propagated
+
+	proto.source = src -- source name
+
+	S:s_int() -- line defined
+	S:s_int() -- last line defined
+
+	proto.num_upval = stm_byte(S) -- num upvalues
+	proto.num_param = stm_byte(S) -- num params
+
+	stm_byte(S) -- vararg flag
+	proto.max_stack = stm_byte(S) -- max stack size
+
+	proto.code = stm_inst_list(S)
+	proto.const = stm_const_list(S)
+	proto.subs = stm_sub_list(S, src)
+	proto.lines = stm_line_list(S)
+
+	stm_loc_list(S)
+	stm_upval_list(S)
+
+	-- post process optimization
+	for _, v in ipairs(proto.code) do
+		if v.is_K then
+			v.const = proto.const[v.Bx + 1] -- offset for 1 based index
+		else
+			if v.is_KB then v.const_B = proto.const[v.B - 0xFF] end
+
+			if v.is_KC then v.const_C = proto.const[v.C - 0xFF] end
+		end
+	end
+
+	return proto
+end
+
+function lua_bc_to_state(src)
+	-- func reader
+	local rdr_func
+
+	-- header flags
+	local little
+	local size_int
+	local size_szt
+	local size_ins
+	local size_num
+	local flag_int
+
+	-- stream object
+	local stream = {
+		-- data
+		index = 1,
+		source = src,
+	}
+	assert(stm_string(stream, 4) == '\27Lua', 'invalid Lua signature')
+	assert(stm_byte(stream) == 0x51, 'invalid Lua version')
+	assert(stm_byte(stream) == 0, 'invalid Lua format')
+
+	little = stm_byte(stream) ~= 0
+	size_int = stm_byte(stream)
+	size_szt = stm_byte(stream)
+	size_ins = stm_byte(stream)
+	size_num = stm_byte(stream)
+	flag_int = stm_byte(stream) ~= 0
+
+	rdr_func = little and rd_int_le or rd_int_be
+	stream.s_int = cst_int_rdr(size_int, rdr_func)
+	stream.s_szt = cst_int_rdr(size_szt, rdr_func)
+	stream.s_ins = cst_int_rdr(size_ins, rdr_func)
+
+	if flag_int then
+		stream.s_num = cst_int_rdr(size_num, rdr_func)
+	elseif float_types[size_num] then
+		stream.s_num = cst_flt_rdr(size_num, float_types[size_num][little and 'little' or 'big'])
+	else
+		error('unsupported float size')
+	end
+
+	return stm_lua_func(stream, '@virtual')
+end
+
+local function close_lua_upvalues(list, index)
+	for i, uv in pairs(list) do
+		if uv.index >= index then
+			uv.value = uv.store[uv.index] -- store value
+			uv.store = uv
+			uv.index = 'value' -- self reference
+			list[i] = nil
+		end
+	end
+end
+
+local function open_lua_upvalue(list, index, memory)
+	local prev = list[index]
+
+	if not prev then
+		prev = {index = index, store = memory}
+		list[index] = prev
+	end
+
+	return prev
+end
+
+local function on_lua_error(failed, err)
+	local src = failed.source
+	local line = failed.lines[failed.pc - 1]
+
+	error(string.format('%s:%i: %s', src, line, err), 0)
+end
+
+local function run_lua_func(state, env, upvals)
+	local code = state.code
+	local subs = state.subs
+	local vararg = state.vararg
+
+	local top_index = -1
+	local open_list = {}
+	local memory = state.memory
+	local pc = state.pc
+
+	while true do
+		local inst = code[pc]
+		local op = inst.op
+		pc += 1
+
+		if op < 18 then
+			if op < 8 then
+				if op < 3 then
+					if op < 1 then
+						--[[LOADNIL]]
+						for i = inst.A, inst.B do memory[i] = nil end
+					elseif op > 1 then
+						--[[GETUPVAL]]
+						local uv = upvals[inst.B]
+
+						memory[inst.A] = uv.store[uv.index]
+					else
+						--[[ADD]]
+						local lhs, rhs
+
+						if inst.is_KB then
+							lhs = inst.const_B
+						else
+							lhs = memory[inst.B]
+						end
+
+						if inst.is_KC then
+							rhs = inst.const_C
+						else
+							rhs = memory[inst.C]
+						end
+
+						memory[inst.A] = lhs + rhs
+					end
+				elseif op > 3 then
+					if op < 6 then
+						if op > 4 then
+							--[[SELF]]
+							local A = inst.A
+							local B = inst.B
+							local index
+
+							if inst.is_KC then
+								index = inst.const_C
+							else
+								index = memory[inst.C]
+							end
+
+							memory[A + 1] = memory[B]
+							memory[A] = memory[B][index]
+						else
+							--[[GETGLOBAL]]
+							memory[inst.A] = env[inst.const]
+						end
+					elseif op > 6 then
+						--[[GETTABLE]]
+						local index
+
+						if inst.is_KC then
+							index = inst.const_C
+						else
+							index = memory[inst.C]
+						end
+
+						memory[inst.A] = memory[inst.B][index]
+					else
+						--[[SUB]]
+						local lhs, rhs
+
+						if inst.is_KB then
+							lhs = inst.const_B
+						else
+							lhs = memory[inst.B]
+						end
+
+						if inst.is_KC then
+							rhs = inst.const_C
+						else
+							rhs = memory[inst.C]
+						end
+
+						memory[inst.A] = lhs - rhs
+					end
+				else --[[MOVE]]
+					memory[inst.A] = memory[inst.B]
+				end
+			elseif op > 8 then
+				if op < 13 then
+					if op < 10 then
+						--[[SETGLOBAL]]
+						env[inst.const] = memory[inst.A]
+					elseif op > 10 then
+						if op < 12 then
+							--[[CALL]]
+							local A = inst.A
+							local B = inst.B
+							local C = inst.C
+							local params
+
+							if B == 0 then
+								params = top_index - A
+							else
+								params = B - 1
+							end
+
+							local ret_list = table.pack(memory[A](table.unpack(memory, A + 1, A + params)))
+							local ret_num = ret_list.n
+
+							if C == 0 then
+								top_index = A + ret_num - 1
+							else
+								ret_num = C - 1
+							end
+
+							table.move(ret_list, 1, ret_num, A, memory)
+						else
+							--[[SETUPVAL]]
+							local uv = upvals[inst.B]
+
+							uv.store[uv.index] = memory[inst.A]
+						end
+					else
+						--[[MUL]]
+						local lhs, rhs
+
+						if inst.is_KB then
+							lhs = inst.const_B
+						else
+							lhs = memory[inst.B]
+						end
+
+						if inst.is_KC then
+							rhs = inst.const_C
+						else
+							rhs = memory[inst.C]
+						end
+
+						memory[inst.A] = lhs * rhs
+					end
+				elseif op > 13 then
+					if op < 16 then
+						if op > 14 then
+							--[[TAILCALL]]
+							local A = inst.A
+							local B = inst.B
+							local params
+
+							if B == 0 then
+								params = top_index - A
+							else
+								params = B - 1
+							end
+
+							close_lua_upvalues(open_list, 0)
+
+							return memory[A](table.unpack(memory, A + 1, A + params))
+						else
+							--[[SETTABLE]]
+							local index, value
+
+							if inst.is_KB then
+								index = inst.const_B
+							else
+								index = memory[inst.B]
+							end
+
+							if inst.is_KC then
+								value = inst.const_C
+							else
+								value = memory[inst.C]
+							end
+
+							memory[inst.A][index] = value
+						end
+					elseif op > 16 then
+						--[[NEWTABLE]]
+						memory[inst.A] = table.create(inst.const) -- inst.const contains array size
+					else
+						--[[DIV]]
+						local lhs, rhs
+
+						if inst.is_KB then
+							lhs = inst.const_B
+						else
+							lhs = memory[inst.B]
+						end
+
+						if inst.is_KC then
+							rhs = inst.const_C
+						else
+							rhs = memory[inst.C]
+						end
+
+						memory[inst.A] = lhs / rhs
+					end
+				else
+					--[[LOADK]]
+					memory[inst.A] = inst.const
+				end
+			else
+				--[[FORLOOP]]
+				local A = inst.A
+				local step = memory[A + 2]
+				local index = memory[A] + step
+				local limit = memory[A + 1]
+				local loops
+
+				if step == math.abs(step) then
+					loops = index <= limit
+				else
+					loops = index >= limit
+				end
+
+				if loops then
+					memory[A] = index
+					memory[A + 3] = index
+					pc += inst.sBx
+				end
+			end
+		elseif op > 18 then
+			if op < 28 then
+				if op < 23 then
+					if op < 20 then
+						--[[LEN]]
+						memory[inst.A] = #memory[inst.B]
+					elseif op > 20 then
+						if op < 22 then
+							--[[RETURN]]
+							local A = inst.A
+							local B = inst.B
+							local len
+
+							if B == 0 then
+								len = top_index - A + 1
+							else
+								len = B - 1
+							end
+
+							close_lua_upvalues(open_list, 0)
+
+							return table.unpack(memory, A, A + len - 1)
+						else
+							--[[CONCAT]]
+							local B, C = inst.B, inst.C
+							local success, str = pcall(table.concat, memory, "", B, C)
+
+							if not success then
+								str = memory[B]
+
+								for i = B + 1, C do str ..= memory[i] end
+							end
+
+							memory[inst.A] = str
+						end
+					else
+						--[[MOD]]
+						local lhs, rhs
+
+						if inst.is_KB then
+							lhs = inst.const_B
+						else
+							lhs = memory[inst.B]
+						end
+
+						if inst.is_KC then
+							rhs = inst.const_C
+						else
+							rhs = memory[inst.C]
+						end
+
+						memory[inst.A] = lhs % rhs
+					end
+				elseif op > 23 then
+					if op < 26 then
+						if op > 24 then
+							--[[CLOSE]]
+							close_lua_upvalues(open_list, inst.A)
+						else
+							--[[EQ]]
+							local lhs, rhs
+
+							if inst.is_KB then
+								lhs = inst.const_B
+							else
+								lhs = memory[inst.B]
+							end
+
+							if inst.is_KC then
+								rhs = inst.const_C
+							else
+								rhs = memory[inst.C]
+							end
+
+							if (lhs == rhs) == (inst.A ~= 0) then pc += code[pc].sBx end
+
+							pc += 1
+						end
+					elseif op > 26 then
+						--[[LT]]
+						local lhs, rhs
+
+						if inst.is_KB then
+							lhs = inst.const_B
+						else
+							lhs = memory[inst.B]
+						end
+
+						if inst.is_KC then
+							rhs = inst.const_C
+						else
+							rhs = memory[inst.C]
+						end
+
+						if (lhs < rhs) == (inst.A ~= 0) then pc += code[pc].sBx end
+
+						pc += 1
+					else
+						--[[POW]]
+						local lhs, rhs
+
+						if inst.is_KB then
+							lhs = inst.const_B
+						else
+							lhs = memory[inst.B]
+						end
+
+						if inst.is_KC then
+							rhs = inst.const_C
+						else
+							rhs = memory[inst.C]
+						end
+
+						memory[inst.A] = lhs ^ rhs
+					end
+				else
+					--[[LOADBOOL]]
+					memory[inst.A] = inst.B ~= 0
+
+					if inst.C ~= 0 then pc += 1 end
+				end
+			elseif op > 28 then
+				if op < 33 then
+					if op < 30 then
+						--[[LE]]
+						local lhs, rhs
+
+						if inst.is_KB then
+							lhs = inst.const_B
+						else
+							lhs = memory[inst.B]
+						end
+
+						if inst.is_KC then
+							rhs = inst.const_C
+						else
+							rhs = memory[inst.C]
+						end
+
+						if (lhs <= rhs) == (inst.A ~= 0) then pc += code[pc].sBx end
+
+						pc += 1
+					elseif op > 30 then
+						if op < 32 then
+							--[[CLOSURE]]
+							local sub = subs[inst.Bx + 1] -- offset for 1 based index
+							local nups = sub.num_upval
+							local uvlist
+
+							if nups ~= 0 then
+								uvlist = table.create(nups - 1)
+
+								for i = 1, nups do
+									local pseudo = code[pc + i - 1]
+
+									if pseudo.op == OPCODE_RM[0] then -- @MOVE
+										uvlist[i - 1] = open_lua_upvalue(open_list, pseudo.B, memory)
+									elseif pseudo.op == OPCODE_RM[4] then -- @GETUPVAL
+										uvlist[i - 1] = upvals[pseudo.B]
+									end
+								end
+
+								pc += nups
+							end
+
+							memory[inst.A] = lua_wrap_state(sub, env, uvlist)
+						else
+							--[[TESTSET]]
+							local A = inst.A
+							local B = inst.B
+
+							if (not memory[B]) ~= (inst.C ~= 0) then
+								memory[A] = memory[B]
+								pc += code[pc].sBx
+							end
+							pc += 1
+						end
+					else
+						--[[UNM]]
+						memory[inst.A] = -memory[inst.B]
+					end
+				elseif op > 33 then
+					if op < 36 then
+						if op > 34 then
+							--[[VARARG]]
+							local A = inst.A
+							local len = inst.B
+
+							if len == 0 then
+								len = vararg.len
+								top_index = A + len - 1
+							end
+
+							table.move(vararg.list, 1, len, A, memory)
+						else
+							--[[FORPREP]]
+							local A = inst.A
+							local init, limit, step
+							init = assert(tonumber(memory[A]), '`for` initial value must be a number')
+							limit = assert(tonumber(memory[A + 1]), '`for` limit must be a number')
+							step = assert(tonumber(memory[A + 2]), '`for` step must be a number')
+							memory[A] = init - step
+							memory[A + 1] = limit
+							memory[A + 2] = step
+							pc += inst.sBx
+						end
+					elseif op > 36 then
+						--[[SETLIST]]
+						local A = inst.A
+						local C = inst.C
+						local len = inst.B
+						local tab = memory[A]
+						local offset
+
+						if len == 0 then len = top_index - A end
+
+						if C == 0 then
+							C = inst[pc].value
+							pc += 1
+						end
+
+						offset = (C - 1) * FIELDS_PER_FLUSH
+
+						table.move(memory, A + 1, A + len, offset + 1, tab)
+					else
+						--[[NOT]]
+						memory[inst.A] = not memory[inst.B]
+					end
+				else
+					--[[TEST]]
+					if (not memory[inst.A]) ~= (inst.C ~= 0) then pc += code[pc].sBx end
+					pc += 1
+				end
+			else
+				--[[TFORLOOP]]
+				local A = inst.A
+				local base = A + 3
+
+				local vals = {memory[A](memory[A + 1], memory[A + 2])}
+
+				table.move(vals, 1, inst.C, base, memory)
+
+				if memory[base] ~= nil then
+					memory[A + 2] = memory[base]
+					pc += code[pc].sBx
+				end
+
+				pc += 1
+			end
+		else
+			--[[JMP]]
+			pc += inst.sBx
+		end
+
+		state.pc = pc
+	end
+end
+
+function lua_wrap_state(proto, env, upval)
+	local function wrapped(...)
+		local passed = table.pack(...)
+		local memory = table.create(proto.max_stack)
+		local vararg = {len = 0, list = {}}
+
+		table.move(passed, 1, proto.num_param, 0, memory)
+
+		if proto.num_param < passed.n then
+			local start = proto.num_param + 1
+			local len = passed.n - proto.num_param
+
+			vararg.len = len
+			table.move(passed, start, start + len - 1, 1, vararg.list)
+		end
+
+		local state = {vararg = vararg, memory = memory, code = proto.code, subs = proto.subs, pc = 1}
+
+		local result = table.pack(pcall(run_lua_func, state, env, upval))
+
+		if result[1] then
+			return table.unpack(result, 2, result.n)
+		else
+			local failed = {pc = state.pc, source = proto.source, lines = proto.lines}
+
+			on_lua_error(failed, result[2])
+
+			return
+		end
+	end
+
+	return wrapped
+end
+
+local function createExecutable(bCode, env)
+	return lua_wrap_state(lua_bc_to_state(bCode), env)
+end
+
+local function LoadSModule(source)
+	local executable
+	local env = getfenv(2)
+	local ran, failureReason = pcall(function(): ()
+		local compiledBytecode = compile(source, "Elysian")
+		executable = createExecutable(compiledBytecode, env)
+	end)
+	if ran then
+		return setfenv(executable, env)
+	end
+	return nil, failureReason
+end
+
+ely.Execute.MouseButton1Down:Connect(function()
+	local Ret, Failed = LoadSModule(ScriptContent.Text)
+	if typeof(Ret) == "function"then
+		local Success, Return = pcall(Ret)
+		if not Success then
+			local Txt = tostring(Return)
+			local _, Found2 = string.find(Txt, "ElysianLS")
+			if Found2 then
+				print(string.sub(Txt, Found2 + 1))
+			end
+		end
+	else
+		print(Failed)
+	end
+end)
